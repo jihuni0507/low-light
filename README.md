@@ -73,6 +73,25 @@ python main.py --config config.yaml
 ```
 
 ---
+### 🔶 `train_base_gaussians.py`
+
+**One-line Command**
+``` Bash
+python train/train_base_gaussians.py
+```
+
+**Default**
+``` Bash
+python train/train_base_gaussians.py \
+  --colmap_dir datasets/colmap \
+  --output_dir ./output/base \
+  --epochs 1 \
+  --max_train_steps 1000 \
+  --learning_rate 1e-3 \
+  --device cuda
+```
+
+---
 ### 🔶 `train_injection_network.py`
 #### 🔸 Text-Conditioned Training
 
