@@ -9,6 +9,9 @@
 5. Loss - computed based on target SH or current SH
 
 ```
+## Overall Pipeline
+<img width="995" height="963" alt="image" src="https://github.com/user-attachments/assets/f24ab313-1b85-4c14-bfd5-0f7054fb2636" />
+
 
 ## 사용방식
 ### 🔶 Environment Setting
