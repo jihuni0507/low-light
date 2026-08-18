@@ -86,6 +86,14 @@ class GaussianModel:
         self._rotation.requires_grad_(False)
         self._opacity.requires_grad_(False)
         
+    def to(self, device):
+        """Move all Gaussian tensors to the target device."""
+        for attr in ['_xyz', '_features_dc', '_features_rest', '_scaling', '_rotation', '_opacity']:
+            tensor = getattr(self, attr, None)
+            if isinstance(tensor, torch.Tensor):
+                setattr(self, attr, tensor.to(device))
+        return self
+
     @property
     def get_xyz(self):
         return self._xyz

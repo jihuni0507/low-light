@@ -1,0 +1,37 @@
+# config.yaml
+pipeline:
+  run_train_base: false
+  run_clip_encode: true
+  run_injection: true
+
+global:
+  device: "cuda"  # or "cpu"
+
+train:
+  colmap_dir: "datasets/colmap"
+  data_dir: ""
+  output_dir: "./output/base"
+  max_train_steps: 1000
+  epochs: 1
+  learning_rate: 0.001
+  batch_size: 1
+  num_workers: 0
+  seed: 43
+  model_name: "GSRecon"
+  sh_degree: 3
+  load_pretrained_model: false
+
+clip:
+  model_name: "openai/clip-vit-base-patch32"
+  text_prompt: "a brightly lit daytime scene"
+  image_path: ""
+
+injection:
+  gaussian_ply: "output/base/gaussians.ply"
+  target_ply: ""
+  output_ply: "output/injection/injected_gaussians.ply"
+  learning_rate: 0.0001
+  epochs: 10
+  hidden_dim: 256
+  freeze_geometry: true
+  target_attr: "SH_DC"
