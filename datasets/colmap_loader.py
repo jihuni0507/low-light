@@ -25,6 +25,7 @@ CAMERA_MODELS = {
 }
 CAMERA_MODEL_IDS = {camera_model.model_id: camera_model for camera_model in CAMERA_MODELS}
 CAMERA_MODEL_NAMES = {camera_model.model_name: camera_model for camera_model in CAMERA_MODELS}
+UNREGISTERED_POINT3D_ID = (1 << 64) - 1
 
 
 def qvec2rotmat(qvec):
@@ -63,23 +64,23 @@ class ColmapLoader:
         self.colmap_dir = colmap_dir
         self.cameras = {}
         self.images = {}
-        self.points3d = {}
+        self.points3D = {}
         self._load_data()
 
     def _load_data(self):
         camera_bin = os.path.join(self.colmap_dir, "cameras.bin")
         image_bin = os.path.join(self.colmap_dir, "images.bin")
-        points_bin = os.path.join(self.colmap_dir, "points3d.bin")
+        points_bin = os.path.join(self.colmap_dir, "points3D.bin")
 
         if os.path.exists(camera_bin) and os.path.exists(image_bin) and os.path.exists(points_bin):
             self.cameras = self.read_cameras_binary(camera_bin)
             self.images = self.read_images_binary(image_bin)
-            self.points3d = self.read_points3d_binary(points_bin)
+            self.points3D = self.read_points3D_binary(points_bin)
             return
 
         self.cameras = self.read_cameras_text(os.path.join(self.colmap_dir, "cameras.txt"))
         self.images = self.read_images_text(os.path.join(self.colmap_dir, "images.txt"))
-        self.points3d = self.read_points3d_text(os.path.join(self.colmap_dir, "points3d.txt"))
+        self.points3D = self.read_points3D_text(os.path.join(self.colmap_dir, "points3D.txt"))
 
     def get_camera_poses(self):
         pose_data = []
@@ -100,7 +101,7 @@ class ColmapLoader:
 
     def get_initial_point_cloud(self):
         xyz, rgb = [], []
-        for point_id, point_data in self.points3d.items():
+        for point_id, point_data in self.points3D.items():
             xyz.append(point_data.xyz)
             rgb.append(point_data.rgb)
         if len(xyz) == 0:
@@ -161,6 +162,8 @@ class ColmapLoader:
                 for _ in range(num_points2D):
                     x, y = self.read_next_bytes(fid, 16, "dd")
                     point3D_id = self.read_next_bytes(fid, 8, "Q")[0]
+                    if point3D_id == UNREGISTERED_POINT3D_ID:
+                        point3D_id = -1
                     xys.append((float(x), float(y)))
                     point3D_ids.append(point3D_id)
 
@@ -175,8 +178,8 @@ class ColmapLoader:
                 )
         return images
 
-    def read_points3d_binary(self, path_to_model_file):
-        points3d = {}
+    def read_points3D_binary(self, path_to_model_file):
+        points3D = {}
         with open(path_to_model_file, "rb") as fid:
             num_points = self.read_next_bytes(fid, 8, "Q")[0]
             for _ in range(num_points):
@@ -194,7 +197,7 @@ class ColmapLoader:
                     track.append((image_id, point2D_idx))
                     point2D_idxs.append(point2D_idx)
 
-                points3d[point3D_id] = Point3D(
+                points3D[point3D_id] = Point3D(
                     id=point3D_id,
                     xyz=xyz,
                     rgb=rgb,
@@ -202,7 +205,7 @@ class ColmapLoader:
                     track=track,
                     point2D_idxs=np.asarray(point2D_idxs, dtype=np.int64) if point2D_idxs else np.empty((0,), dtype=np.int64),
                 )
-        return points3d
+        return points3D
 
     def read_cameras_text(self, path_to_model_file):
         cameras = {}
@@ -268,8 +271,8 @@ class ColmapLoader:
             )
         return images
 
-    def read_points3d_text(self, path_to_model_file):
-        points3d = {}
+    def read_points3D_text(self, path_to_model_file):
+        points3D = {}
         with open(path_to_model_file, "r", encoding="utf-8") as fid:
             for line in fid:
                 line = line.strip()
@@ -296,7 +299,7 @@ class ColmapLoader:
                     track.append((image_id, point2D_idx))
                     point2D_idxs.append(point2D_idx)
 
-                points3d[point3D_id] = Point3D(
+                points3D[point3D_id] = Point3D(
                     id=point3D_id,
                     xyz=xyz,
                     rgb=rgb,
@@ -304,7 +307,7 @@ class ColmapLoader:
                     track=track,
                     point2D_idxs=np.asarray(point2D_idxs, dtype=np.int64) if point2D_idxs else np.empty((0,), dtype=np.int64),
                 )
-        return points3d
+        return points3D
 
 
 __all__ = ["ColmapLoader", "CameraModel", "Camera", "Image", "Point3D", "qvec2rotmat", "rotmat2qvec"]

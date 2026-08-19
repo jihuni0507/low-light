@@ -96,7 +96,7 @@ class ColmapPointCloudDataset(Dataset):
     def __getitem__(self, idx):
         return {
             "xyz": self.xyz[idx],
-            "rgb": self.rgb[idx], 
+            "rgb": self.rgb[idx],
             "camera_pose": self.camera_poses[idx % len(self.camera_poses)] if self.camera_poses else None,
         }
 
