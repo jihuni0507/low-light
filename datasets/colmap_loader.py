@@ -143,7 +143,7 @@ class ColmapLoader:
         with open(path_to_model_file, "rb") as fid:
             num_reg_images = self.read_next_bytes(fid, 8, "Q")[0]
             for _ in range(num_reg_images):
-                image_id = self.read_next_bytes(fid, 8, "Q")[0]
+                image_id = self.read_next_bytes(fid, 4, "I")[0]
                 qvec = np.asarray(self.read_next_bytes(fid, 32, "dddd"), dtype=np.float64)
                 tvec = np.asarray(self.read_next_bytes(fid, 24, "ddd"), dtype=np.float64)
                 camera_id = self.read_next_bytes(fid, 4, "i")[0]
@@ -192,8 +192,8 @@ class ColmapLoader:
                 track = []
                 point2D_idxs = []
                 for _ in range(track_length):
-                    image_id = self.read_next_bytes(fid, 8, "Q")[0]
-                    point2D_idx = self.read_next_bytes(fid, 8, "Q")[0]
+                    image_id = self.read_next_bytes(fid, 4, "I")[0]
+                    point2D_idx = self.read_next_bytes(fid, 4, "I")[0]
                     track.append((image_id, point2D_idx))
                     point2D_idxs.append(point2D_idx)
 
