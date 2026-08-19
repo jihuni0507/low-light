@@ -2,7 +2,7 @@
 
 ## Implementation Logic
 ``` Text
-1. Light GS reconstruction by GSRecon
+1. Reconstruct Gaussian splats with StereoGS
 2. Generate text/image condition vector by CLIP encoder
 3. Input Gaussians and condition vector into injection network
 4. Freeze Gaussians' geometry, update only SH features
@@ -39,11 +39,26 @@ export PYTHONPATH=$PWD
 python main.py --config config.yaml --stage clip
 ```
 
-**3) GS base training만 단독 실행**
+**3) StereoGS base reconstruction**
 ``` Bash
-export PYTHONPATH=$PWD
-python main.py --config config.yaml --stage base
+cd ../StereoGS
+python train.py \
+  -s /path/to/scene \
+  -m ./output/llff/fern_3views \
+  --dataset_name LLFF \
+  --n_views 3 \
+  --resolution 8 \
+  --eval \
+  --use_mvs_init \
+  --mvs_model_name MVSAnywhere \
+  --sh_degree 3
 ```
+
+StereoGS saves the handoff file at
+`<model_path>/point_cloud/iteration_<N>/point_cloud.ply`. Set
+`injection.gaussian_ply` in `config.yaml` to that file before running the
+injection stage. The `--sh_degree 3` option is required because this project
+expects 45 non-DC SH values per Gaussian.
 
 **4) SH injection만 실행**
 ``` Bash
@@ -76,7 +91,8 @@ python main.py --config config.yaml
 ```
 
 ---
-### 🔶 `train_base_gaussians.py`
+
+### ~~🔶 `train_base_gaussians.py`~~
 
 **One-line Command**
 ``` Bash
@@ -93,7 +109,53 @@ python train/train_base_gaussians.py \
   --learning_rate 1e-3 \
   --device cuda
 ```
-
+---
+### 🔶 Gaussian Reconstruction using StereoGS
+Recommended commmand
+```bash
+python train.py \
+  -s /path/to/scene \
+  -m ./output/LLFF/scene_3views \
+  --dataset_name LLFF \
+  --n_views 3 \
+  --resolution 8 \
+  --eval \
+  --sh_degree 3 \
+  --use_mvs_init \
+  --mvs_model_name MVSAnywhere \
+  --opacity_decay \
+  --opacity_decay_factor 0.99 \
+  --grad_sensitivity 0.5 \
+  --generate_binocular_view \
+  --start_generate_binocular_view_iters 20000 \
+  --cam_trans_dist 4.0 \
+  --binocular_model_type FoundationStereo \
+  --binocular_depth \
+  --lambda_binocular 1.0 \
+  --dropout_factor 0.3 \
+  --init_pcd_downsample 0.1
+```
+Required structure of `/path/to/acene`
+``` bash
+scene/
+├── images/
+└── sparse/
+    └── 0/
+        ├── cameras.bin
+        ├── images.bin
+        └── points3D.bin
+```
+Example for `office1`:
+``` bash
+python train.py \
+  -s /home/work/test2/datasets/office1 \
+  -m ./output/LLFF/office1_3views \
+  --dataset_name LLFF \
+  --n_views 3 \
+  --resolution 8 \
+  --eval \
+  --sh_degree 3
+```
 ---
 ### 🔶 `train_injection_network.py`
 #### 🔸 Text-Conditioned Training

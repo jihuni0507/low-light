@@ -17,7 +17,7 @@ train:
   batch_size: 1
   num_workers: 0
   seed: 43
-  model_name: "GSRecon"
+  model_name: "StereoGS"
   sh_degree: 3
   load_pretrained_model: false
 
@@ -27,7 +27,8 @@ clip:
   image_path: ""
 
 injection:
-  gaussian_ply: "output/base/gaussians.ply"
+  # StereoGS writes: <model_path>/point_cloud/iteration_<N>/point_cloud.ply
+  gaussian_ply: "../StereoGS/output/llff/fern_3views/point_cloud/iteration_30000/point_cloud.ply"
   target_ply: ""
   output_ply: "output/injection/injected_gaussians.ply"
   learning_rate: 0.0001
