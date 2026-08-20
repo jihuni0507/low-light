@@ -27,7 +27,7 @@ class CLIPEncoder:
 
     def __init__(
         self,
-        model_name: str = "openai/clip-vit-base-patch32",
+        model_name: str = "ViT-B-32",
         device: Optional[str] = None,
         backend: str = "auto",
     ):
@@ -127,12 +127,12 @@ class CLIPEncoder:
         return embeddings
 
 
-def encode_text(texts: Union[str, Sequence[str]], model_name: str = "openai/clip-vit-base-patch32") -> torch.Tensor:
+def encode_text(texts: Union[str, Sequence[str]], model_name: str = "ViT-B-32") -> torch.Tensor:
     encoder = CLIPEncoder(model_name=model_name)
     return encoder.encode_text(texts)
 
 
-def encode_image(image: Union[str, Image.Image, torch.Tensor], model_name: str = "openai/clip-vit-base-patch32") -> torch.Tensor:
+def encode_image(image: Union[str, Image.Image, torch.Tensor], model_name: str = "ViT-B-32") -> torch.Tensor:
     encoder = CLIPEncoder(model_name=model_name)
     return encoder.encode_image(image)
 
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Encode text or an image with a CLIP model.")
     parser.add_argument("--text", nargs="*", default=None, help="Text prompt(s) to encode.")
     parser.add_argument("--image", type=str, default=None, help="Path to an input image.")
-    parser.add_argument("--model", default="openai/clip-vit-base-patch32", help="CLIP model name.")
+    parser.add_argument("--model", default="ViT-B-32", help="CLIP model name.")
     args = parser.parse_args()
 
     encoder = CLIPEncoder(model_name=args.model)

@@ -20,6 +20,16 @@ def load_config(config_path: str):
     return config
 
 
+def resolve_device(config):
+    configured_device = config.get("global", {}).get(
+        "device", "cuda" if torch.cuda.is_available() else "cpu"
+    )
+    if str(configured_device).startswith("cuda") and not torch.cuda.is_available():
+        print("CUDA is unavailable in this PyTorch environment; using CPU.")
+        return "cpu"
+    return configured_device
+
+
 def resolve_path(path_value, root_dir):
     if not path_value:
         return ""
@@ -57,7 +67,7 @@ def run_base_training(config, root_dir):
 
 def encode_clip_condition(config, root_dir):
     clip_cfg = config.get("clip", {})
-    device = config.get("global", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(config)
     encoder = CLIPEncoder(model_name=clip_cfg.get("model_name", "openai/clip-vit-base-patch32"), device=device)
 
     text_prompt = clip_cfg.get("text_prompt", "")
@@ -73,31 +83,70 @@ def encode_clip_condition(config, root_dir):
     return cond.squeeze(0).to(device)
 
 
-def run_injection_training(config, root_dir, condition_vec):
+def prepare_gaussian_input(config, root_dir, device):
+    """Load a StereoGS PLY and prepare SH features for injection."""
     injection_cfg = config.get("injection", {})
     train_cfg = config.get("train", {})
-    device = config.get("global", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device(device)
     sh_degree = int(train_cfg.get("sh_degree", 3))
 
-    gaussian_ply = resolve_path(injection_cfg.get("gaussian_ply", "output/base_gaussian_last.pt"), root_dir)
-    if gaussian_ply.endswith(".pt"):
-        raise ValueError("Injection pipeline expects a Gaussian .ply file, not a checkpoint .pt file.")
-    if not os.path.exists(gaussian_ply):
+    gaussian_ply_value = injection_cfg.get("gaussian_ply", "")
+    if not gaussian_ply_value:
+        raise ValueError("injection.gaussian_ply must point to a StereoGS PLY file.")
+
+    gaussian_ply = Path(resolve_path(gaussian_ply_value, root_dir))
+    if gaussian_ply.suffix.lower() != ".ply":
+        raise ValueError(
+            f"Expected a StereoGS .ply file, got: {gaussian_ply}"
+        )
+    if not gaussian_ply.is_file():
         raise FileNotFoundError(f"Gaussian PLY file not found: {gaussian_ply}")
 
     model = GaussianModel(sh_degree=sh_degree)
     model.load_ply(gaussian_ply)
     model.to(device)
-    model.freeze_geometry()
 
-    source_features = model.get_features.to(device)
+    expected_coefficients = (sh_degree + 1) ** 2
+    features = model.get_features
+    if features.ndim != 3 or features.shape[1:] != (expected_coefficients, 3):
+        raise ValueError(
+            "Loaded Gaussian SH shape mismatch: "
+            f"expected (N, {expected_coefficients}, 3), got {tuple(features.shape)}"
+        )
+    if not torch.isfinite(features).all():
+        raise ValueError("Loaded Gaussian SH features contain NaN or infinite values.")
+
+    if bool(injection_cfg.get("freeze_geometry", True)):
+        model.freeze_geometry()
+
+    # Detach the loaded features so only the injection network receives gradients.
+    source_features = features.detach().to(device=device, dtype=torch.float32)
+    print(
+        f"Loaded {features.shape[0]} Gaussians from {gaussian_ply} "
+        f"with SH shape {tuple(features.shape)}"
+    )
+    return model, source_features
+
+
+def run_injection_training(config, root_dir, condition_vec):
+    injection_cfg = config.get("injection", {})
+    device = resolve_device(config)
+    device = torch.device(device)
+
+    model, source_features = prepare_gaussian_input(config, root_dir, device)
+    sh_degree = model.max_sh_degree
     target_path = resolve_path(injection_cfg.get("target_ply", ""), root_dir)
     if target_path and os.path.exists(target_path):
         target_model = GaussianModel(sh_degree=sh_degree)
         target_model.load_ply(target_path)
         target_model.to(device)
-        target_features = target_model.get_features.to(device)
+        target_features = target_model.get_features.detach().to(device=device, dtype=torch.float32)
+        if target_features.shape != source_features.shape:
+            raise ValueError(
+                "Target Gaussian feature shape must match the StereoGS source: "
+                f"source={tuple(source_features.shape)}, target={tuple(target_features.shape)}"
+            )
+        if not torch.isfinite(target_features).all():
+            raise ValueError("Target Gaussian SH features contain NaN or infinite values.")
     else:
         target_features = source_features.clone()
 

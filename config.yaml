@@ -22,13 +22,13 @@ train:
   load_pretrained_model: false
 
 clip:
-  model_name: "openai/clip-vit-base-patch32"
+  model_name: "ViT-B-32"
   text_prompt: "a brightly lit daytime scene"
   image_path: ""
 
 injection:
   # StereoGS writes: <model_path>/point_cloud/iteration_<N>/point_cloud.ply
-  gaussian_ply: "../StereoGS/output/llff/fern_3views/point_cloud/iteration_30000/point_cloud.ply"
+  gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
   target_ply: ""
   output_ply: "output/injection/injected_gaussians.ply"
   learning_rate: 0.0001
