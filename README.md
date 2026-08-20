@@ -66,6 +66,12 @@ export PYTHONPATH=$PWD
 python main.py --config config.yaml --stage injection
 ```
 
+기본 실행은 injection network를 학습하고 `injection.checkpoint`에 가중치를 저장한다. 저장된 가중치를 사용해 inference만 실행하려면:
+``` Bash
+python main.py --config config.yaml --stage injection --train False
+```
+Inference는 체크포인트를 불러와 SH feature를 갱신하고 `injection.output_ply`에 저장한다.
+
 ---
 **5) Text-Conditioned Training**
 ``` Bash

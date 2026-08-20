@@ -31,6 +31,7 @@ injection:
   gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
   target_ply: ""
   output_ply: "output/injection/injected_gaussians.ply"
+  checkpoint: "output/injection/injection_network.pt"
   learning_rate: 0.0001
   epochs: 10
   hidden_dim: 256

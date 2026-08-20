@@ -39,6 +39,17 @@ def resolve_path(path_value, root_dir):
     return str((root_dir / path).resolve())
 
 
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean value, got: {value}")
+
+
 def run_base_training(config, root_dir):
     train_cfg = config.get("train", {})
     base_cfg = {
@@ -127,7 +138,7 @@ def prepare_gaussian_input(config, root_dir, device):
     return model, source_features
 
 
-def run_injection_training(config, root_dir, condition_vec):
+def run_injection(config, root_dir, condition_vec, train=True):
     injection_cfg = config.get("injection", {})
     device = resolve_device(config)
     device = torch.device(device)
@@ -156,18 +167,46 @@ def run_injection_training(config, root_dir, condition_vec):
         hidden_dim=int(injection_cfg.get("hidden_dim", 256)),
     ).to(device)
 
-    optimizer = torch.optim.Adam(net.parameters(), lr=float(injection_cfg.get("learning_rate", 1e-4)))
+    checkpoint_path = resolve_path(
+        injection_cfg.get("checkpoint", "output/injection/injection_network.pt"),
+        root_dir,
+    )
+    if train:
+        optimizer = torch.optim.Adam(net.parameters(), lr=float(injection_cfg.get("learning_rate", 1e-4)))
 
-    for epoch in range(int(injection_cfg.get("epochs", 10))):
-        net.train()
-        optimizer.zero_grad()
-        predicted = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
-        loss = F.mse_loss(predicted, target_features)
-        loss.backward()
-        optimizer.step()
-        print(f"epoch={epoch + 1}/{injection_cfg.get('epochs', 10)} loss={loss.item():.6f}")
+        for epoch in range(int(injection_cfg.get("epochs", 10))):
+            net.train()
+            optimizer.zero_grad()
+            predicted = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
+            loss = F.mse_loss(predicted, target_features)
+            loss.backward()
+            optimizer.step()
+            print(f"epoch={epoch + 1}/{injection_cfg.get('epochs', 10)} loss={loss.item():.6f}")
 
-    updated = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
+        Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "model_state_dict": net.state_dict(),
+                "condition_dim": condition_vec.shape[-1],
+                "hidden_dim": int(injection_cfg.get("hidden_dim", 256)),
+            },
+            checkpoint_path,
+        )
+        print(f"Injection network checkpoint saved to: {checkpoint_path}")
+    else:
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(
+                f"Injection checkpoint not found: {checkpoint_path}. "
+                "Run once with --train True first."
+            )
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        net.load_state_dict(state_dict)
+        net.eval()
+        print(f"Loaded injection network checkpoint: {checkpoint_path}")
+
+    with torch.no_grad():
+        updated = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
     model.set_features(updated[:, :1, :], updated[:, 1:, :])
 
     output_ply = resolve_path(injection_cfg.get("output_ply", "output/injection_updated_gaussians.ply"), root_dir)
@@ -181,6 +220,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description="YAML-driven pipeline orchestrator for Gaussian reconstruction and CLIP-conditioned SH injection.")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to the pipeline YAML file.")
     parser.add_argument("--stage", type=str, default="all", choices=["all", "base", "clip", "injection"], help="Pipeline stage to run.")
+    parser.add_argument("--train", type=parse_bool, default=True, help="Train the injection network; use --train False for inference.")
     return parser
 
 
@@ -210,8 +250,9 @@ def main():
     if args.stage in ("all", "injection") and pipeline_cfg.get("run_injection", False):
         if condition_vec is None:
             condition_vec = encode_clip_condition(config, root_dir)
-        print("[3/3] Running SH injection training...")
-        run_injection_training(config, root_dir, condition_vec)
+        mode = "training" if args.train else "inference"
+        print(f"[3/3] Running SH injection {mode}...")
+        run_injection(config, root_dir, condition_vec, train=args.train)
 
     print("Pipeline complete.")
 
