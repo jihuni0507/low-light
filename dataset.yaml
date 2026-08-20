@@ -1,31 +1,26 @@
-# Injection network dataset.
-# Each sample must contain a source Gaussian PLY, a target Gaussian PLY,
-# and the context used to produce the target appearance.
+# Dataset for text-conditioned Gaussian SH injection.
+# The input Gaussian PLY is shared by all samples. Each sample provides the
+# input image, a target GS PLY, and the prompt used to synthesize that target.
 
 dataset:
-	name: low_light_injection
-	root: "."
-	samples: []
+  name: low_light_injection
+  root: "."
+  source_gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
+  samples:
+    # Replace these example paths with the actual dataset files.
+    - id: office1_daylight
+      input_image: "datasets/inputs/office1.png"
+      target_gs: "datasets/targets/office1_daylight/point_cloud.ply"
+      prompt: "a brightly lit daytime scene"
 
-# Example sample format:
-# dataset:
-#   samples:
-#   - id: office1_day
-#     gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
-#     target_ply: "datasets/targets/office1_day/point_cloud.ply"
-#     context:
-#       type: text
-#       value: "a brightly lit daytime scene"
-#
-#   - id: office1_low_light
-#     gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
-#     target_ply: "datasets/targets/office1_low_light/point_cloud.ply"
-#     context:
-#       type: image
-#       value: "datasets/conditions/office1_low_light.png"
+    - id: office1_low_light
+      input_image: "datasets/inputs/office1.png"
+      target_gs: "datasets/targets/office1_low_light/point_cloud.ply"
+      prompt: "a low-light indoor scene"
 
-# Dataset-wide validation settings.
-validation:
-	require_target_ply: true
-	require_matching_gaussian_count: true
-	require_matching_sh_shape: true
+  validation:
+    require_input_image: true
+    require_target_gs: true
+    require_prompt: true
+    require_matching_gaussian_count: true
+    require_matching_sh_shape: true
