@@ -15,6 +15,8 @@ dataset:
         - input_image: "datasets/inputs/office1_view2.png"
         - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_daylight/point_cloud.ply"
+      camera_json: "../StereoGS/output/LLFF/office1_3views/cameras.json"
+      camera_ids: [0, 1, 2]
       prompt: "a brightly lit daytime scene"
 
     - id: office1_low_light
@@ -23,6 +25,8 @@ dataset:
         - input_image: "datasets/inputs/office1_view2.png"
         - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_low_light/point_cloud.ply"
+      camera_json: "../StereoGS/output/LLFF/office1_3views/cameras.json"
+      camera_ids: [0, 1, 2]
       prompt: "a low-light indoor scene"
 
   validation:

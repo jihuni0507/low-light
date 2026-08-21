@@ -57,15 +57,24 @@ class GaussianInjectionDataset(Dataset):
             self._validate_paths()
 
         self.source_features = self._load_features(self.source_gaussian_ply)
+        self.source_geometry = self._load_geometry(self.source_gaussian_ply)
         self._target_features: Dict[int, torch.Tensor] = {}
         for index, sample in enumerate(self.samples):
-            target_features = self._load_features(self._resolve_path(sample["target_gs"]))
+            target_path = self._resolve_path(sample["target_gs"])
+            target_features = self._load_features(target_path)
             if target_features.shape != self.source_features.shape:
                 raise ValueError(
                     f"Sample {sample.get('id', index)!r} has incompatible SH shape: "
                     f"source={tuple(self.source_features.shape)}, "
                     f"target={tuple(target_features.shape)}"
                 )
+            target_geometry = self._load_geometry(target_path)
+            for name in self.source_geometry:
+                if not torch.allclose(self.source_geometry[name], target_geometry[name], atol=1e-5, rtol=1e-5):
+                    raise ValueError(
+                        f"Sample {sample.get('id', index)!r} target geometry does not match "
+                        f"source geometry in '{name}'"
+                    )
             self._target_features[index] = target_features
 
     def _resolve_path(self, value: str) -> Path:
@@ -114,6 +123,8 @@ class GaussianInjectionDataset(Dataset):
                     )
                 )
             paths.append((f"sample {sample_id} target_gs", self._resolve_path(sample["target_gs"])))
+            if sample.get("camera_json"):
+                paths.append((f"sample {sample_id} camera_json", self._resolve_path(sample["camera_json"])))
 
         missing = [f"{name}: {path}" for name, path in paths if not path.is_file()]
         if missing:
@@ -131,6 +142,14 @@ class GaussianInjectionDataset(Dataset):
             raise ValueError(f"SH features contain NaN or infinity: {path}")
         return features.cpu()
 
+    def _load_geometry(self, path: Path) -> Dict[str, torch.Tensor]:
+        model = GaussianModel(sh_degree=self.sh_degree)
+        model.load_ply(path)
+        return {
+            name: value.detach().cpu().clone()
+            for name, value in model.get_geometry().items()
+        }
+
     def __len__(self) -> int:
         return len(self.samples)
 
@@ -147,6 +166,11 @@ class GaussianInjectionDataset(Dataset):
             "input_images": input_images,
             "input_image": input_images[0],
             "target_gs": str(self._resolve_path(sample["target_gs"])),
+            "camera_json": (
+                str(self._resolve_path(sample["camera_json"]))
+                if sample.get("camera_json") else None
+            ),
+            "camera_ids": sample.get("camera_ids"),
             "prompt": sample["prompt"],
         }
 

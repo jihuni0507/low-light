@@ -44,7 +44,9 @@ source Gaussian PLY + 3 input views + text prompt
 | 항목 | 설명 |
 | --- | --- |
 | `views` | 동일한 scene을 구성하는 원본 이미지 3장의 경로 |
-| `target_gs` | 3개 view를 기준으로 synthesized scene을 Gaussian splatting한 target PLY 경로 |
+| `target_gs` | source와 geometry가 동일한 target PLY 경로 |
+| `camera_json` | StereoGS가 저장한 `cameras.json` 경로 |
+| `camera_ids` | 렌더링할 camera id 목록. 생략하면 첫 3개 사용 |
 | `prompt` | target scene을 생성할 때 사용한 텍스트 prompt |
 
 입력 Gaussian PLY는 동일한 장면을 기준으로 여러 prompt를 학습할 수 있도록
@@ -83,6 +85,8 @@ dataset:
         - input_image: "datasets/inputs/office1_view2.png"
         - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_daylight/point_cloud.ply"
+      camera_json: "../StereoGS/output/LLFF/office1_3views/cameras.json"
+      camera_ids: [0, 1, 2]
       prompt: "a brightly lit daytime scene"
     - id: office1_low_light
       views:
@@ -99,6 +103,8 @@ dataset:
 - 입력 Gaussian과 target Gaussian의 개수가 동일해야 한다.
 - 두 PLY의 SH degree와 SH feature shape이 동일해야 한다.
 - Target PLY는 실제 synthesized image를 Gaussian splatting한 결과여야 한다.
+- Source와 target PLY의 `xyz`, `scale`, `rotation`, `opacity`가 같아야 한다.
+- Rendered hybrid loss에는 source reconstruction의 StereoGS `cameras.json`이 필요하다.
 - 입력 이미지와 prompt는 target 이미지를 생성한 조건과 정확히 대응해야 한다.
 - 각 scene은 반드시 정확히 3개의 view를 가져야 한다.
 - `output/injection/injected_gaussians.ply` 같은 inference 결과물을 target으로 재사용하지 않는다.
@@ -182,6 +188,28 @@ python main.py --config config.yaml --stage injection
 python main.py --config config.yaml --stage injection --train False
 ```
 Inference는 체크포인트를 불러와 SH feature를 갱신하고 `injection.output_ply`에 저장한다.
+
+**7) Hybrid loss 학습**
+
+`train_injection_network.py`는 다음 loss를 사용한다.
+
+```text
+L = lambda_sh * MSE(SH_pred, SH_target)
+  + lambda_image * L1(render(SH_pred), render(SH_target))
+  + lambda_ssim * (1 - SSIM(render(SH_pred), render(SH_target)))
+```
+
+StereoGS의 `render.py`를 별도 프로세스로 실행하지 않고 동일한
+`gaussian_renderer.render()`를 직접 호출한다. 그래야 렌더링 loss의 gradient가
+injection network까지 전달된다.
+
+``` Bash
+python train/train_injection_network.py \
+  --dataset_yaml dataset.yaml \
+  --lambda_sh 1.0 \
+  --lambda_image 1.0 \
+  --lambda_ssim 0.2
+```
 
 ---
 **5) Text-Conditioned Training**
