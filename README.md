@@ -263,14 +263,25 @@ python train.py \
 ```
 ---
 ### 🔶 `train_injection_network.py`
-#### 🔸 Text-Conditioned Training
+Dataset YAML에 등록한 source Gaussian, target GS, prompt 쌍으로 학습한다.
+
+#### 🔸 Dataset Training
 
 ``` Bash
-python train/train_injection_network.py --gaussian_ply path/to/gaussians.ply --text "low-light scene" --condition_mode text --epochs 10
+export PYTHONPATH=$PWD
+python train/train_injection_network.py \
+  --dataset_yaml dataset.yaml \
+  --sh_degree 3 \
+  --batch_size 2 \
+  --epochs 10 \
+  --device cuda
 ```
 
-#### 🔸 Image-Conditioned Training
+`batch_size`는 한 optimization step에 사용할 dataset sample 수다. 각 sample의
+Gaussian 개수는 다를 수 있으므로 DataLoader는 sample list를 반환하고, 학습
+루프는 sample별 SH loss를 계산한 뒤 batch 평균으로 업데이트한다. Prompt들은
+각 batch에서 CLIP으로 한 번에 인코딩한다.
 
-``` Bash
-python train/train_injection_network.py --gaussian_ply path/to/gaussians.ply --image path/to/input.png --condition_mode image --epochs 10
-```
+새 학습 스크립트는 dataset 기반 입력만 지원한다. 단일 PLY와 단일 prompt를
+사용하는 기존 방식 대신, 모든 학습 sample을 `dataset.yaml`에 등록한 뒤
+`--dataset_yaml`로 전달한다.
