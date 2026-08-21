@@ -5,16 +5,23 @@
 dataset:
   name: low_light_injection
   root: "."
+  num_views: 3
   source_gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
   samples:
     # Replace these example paths with the actual dataset files.
     - id: office1_daylight
-      input_image: "datasets/inputs/office1.png"
+      views:
+        - input_image: "datasets/inputs/office1_view1.png"
+        - input_image: "datasets/inputs/office1_view2.png"
+        - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_daylight/point_cloud.ply"
       prompt: "a brightly lit daytime scene"
 
     - id: office1_low_light
-      input_image: "datasets/inputs/office1.png"
+      views:
+        - input_image: "datasets/inputs/office1_view1.png"
+        - input_image: "datasets/inputs/office1_view2.png"
+        - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_low_light/point_cloud.ply"
       prompt: "a low-light indoor scene"
 

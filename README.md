@@ -29,11 +29,11 @@ $env:PYTHONPATH = "your/project/directory"
 
 ### 🔶 Dataset 구성 가이드
 
-Injection network 학습용 데이터셋은 하나의 입력 Gaussian과 여러 개의
-restyled target Gaussian을 연결하는 구조로 구성한다.
+Injection network 학습용 데이터셋은 3개의 입력 view를 하나의 scene으로
+묶고, scene 단위의 target Gaussian과 연결하는 구조로 구성한다.
 
 ```text
-source Gaussian PLY + input image + text prompt
+source Gaussian PLY + 3 input views + text prompt
                          |
                          v
                  target Gaussian PLY
@@ -43,9 +43,9 @@ source Gaussian PLY + input image + text prompt
 
 | 항목 | 설명 |
 | --- | --- |
-| `input_image` | 입력 장면의 원본 이미지 경로 |
-| `target_gs` | 입력 이미지에 대해 Synthesized re-styled image를 Gaussian splatting한 target PLY 경로 |
-| `prompt` | target 이미지를 생성할 때 사용한 텍스트 prompt |
+| `views` | 동일한 scene을 구성하는 원본 이미지 3장의 경로 |
+| `target_gs` | 3개 view를 기준으로 synthesized scene을 Gaussian splatting한 target PLY 경로 |
+| `prompt` | target scene을 생성할 때 사용한 텍스트 prompt |
 
 입력 Gaussian PLY는 동일한 장면을 기준으로 여러 prompt를 학습할 수 있도록
 `dataset.source_gaussian_ply`에 공통 경로로 기록한다. Target PLY는 각 샘플의
@@ -58,7 +58,9 @@ low-light/
 ├── dataset.yaml
 └── datasets/
     ├── inputs/
-    │   └── office1.png
+    │   ├── office1_view1.png
+    │   ├── office1_view2.png
+    │   └── office1_view3.png
     └── targets/
         ├── office1_daylight/
         │   └── point_cloud.ply
@@ -72,14 +74,21 @@ low-light/
 dataset:
   name: low_light_injection
   root: "."
+  num_views: 3
   source_gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
   samples:
     - id: office1_daylight
-      input_image: "datasets/inputs/office1.png"
+      views:
+        - input_image: "datasets/inputs/office1_view1.png"
+        - input_image: "datasets/inputs/office1_view2.png"
+        - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_daylight/point_cloud.ply"
       prompt: "a brightly lit daytime scene"
     - id: office1_low_light
-      input_image: "datasets/inputs/office1.png"
+      views:
+        - input_image: "datasets/inputs/office1_view1.png"
+        - input_image: "datasets/inputs/office1_view2.png"
+        - input_image: "datasets/inputs/office1_view3.png"
       target_gs: "datasets/targets/office1_low_light/point_cloud.ply"
       prompt: "a low-light indoor scene"
 ```
@@ -91,10 +100,12 @@ dataset:
 - 두 PLY의 SH degree와 SH feature shape이 동일해야 한다.
 - Target PLY는 실제 synthesized image를 Gaussian splatting한 결과여야 한다.
 - 입력 이미지와 prompt는 target 이미지를 생성한 조건과 정확히 대응해야 한다.
+- 각 scene은 반드시 정확히 3개의 view를 가져야 한다.
 - `output/injection/injected_gaussians.ply` 같은 inference 결과물을 target으로 재사용하지 않는다.
 
 현재 `dataset.yaml`은 데이터 포맷을 정의하는 단계이며, dataset 전체를 읽는
-DataLoader는 `train/injection_dataset.py`에 구현되어 있다. 실제 학습에서는
+DataLoader는 `train/injection_dataset.py`에 구현되어 있다. `len(dataset)`은
+view 수가 아니라 scene 수이며, 실제 학습에서는
 source Gaussian의 SH feature와 각 샘플의 target SH feature 사이의 loss를
 계산한다.
 
@@ -115,6 +126,7 @@ dataloader = build_injection_dataloader(
 for batch in dataloader:
   condition = encode_prompt_batch(batch, clip_encoder, device="cuda")
   for sample, sample_condition in zip(batch, condition):
+    input_images = sample["input_images"]  # 항상 3개이며 하나의 scene에 해당
     source_features = sample["source_features"].to("cuda")
     target_features = sample["target_features"].to("cuda")
     predicted = injection_network(source_features, sample_condition)
@@ -285,3 +297,17 @@ Gaussian 개수는 다를 수 있으므로 DataLoader는 sample list를 반환�
 새 학습 스크립트는 dataset 기반 입력만 지원한다. 단일 PLY와 단일 prompt를
 사용하는 기존 방식 대신, 모든 학습 sample을 `dataset.yaml`에 등록한 뒤
 `--dataset_yaml`로 전달한다.
+
+---
+### 🔶 Synthesizing Dark Images - Inverse ISP
+`models/inverse_isp.py`에 구현되어 있으며, 사용 예시는 다음과 같다
+``` python
+from models.inverse_isp import InverseISP
+
+InverseISP().from_path(
+    "source.png",
+    "target_low_light.png",
+    seed=42,
+)
+```
+---

@@ -8,8 +8,11 @@ import yaml
 from models.gaussians_model import GaussianModel
 
 
+NUM_VIEWS = 3
+
+
 class GaussianInjectionDataset(Dataset):
-    """Dataset of source Gaussian features, target Gaussian features, and prompts."""
+    """Dataset where exactly three input views define one reconstruction scene."""
 
     def __init__(
         self,
@@ -26,6 +29,13 @@ class GaussianInjectionDataset(Dataset):
             config = yaml.safe_load(file) or {}
 
         dataset_config = config.get("dataset", {})
+        configured_num_views = int(dataset_config.get("num_views", NUM_VIEWS))
+        if configured_num_views != NUM_VIEWS:
+            raise ValueError(
+                f"This dataset requires exactly {NUM_VIEWS} views per scene, "
+                f"got num_views={configured_num_views}"
+            )
+
         root = Path(dataset_config.get("root", "."))
         if not root.is_absolute():
             root = self.dataset_yaml.parent / root
@@ -66,8 +76,6 @@ class GaussianInjectionDataset(Dataset):
 
     def _validate_sample_schema(self, validation: Dict[str, Any]) -> None:
         required_fields = []
-        if validation.get("require_input_image", True):
-            required_fields.append("input_image")
         if validation.get("require_target_gs", True):
             required_fields.append("target_gs")
         if validation.get("require_prompt", True):
@@ -81,12 +89,30 @@ class GaussianInjectionDataset(Dataset):
                 raise ValueError(
                     f"Dataset sample {sample.get('id', index)!r} is missing: {', '.join(missing)}"
                 )
+            views = sample.get("views")
+            if not isinstance(views, list) or len(views) != NUM_VIEWS:
+                raise ValueError(
+                    f"Dataset sample {sample.get('id', index)!r} must contain exactly "
+                    f"{NUM_VIEWS} views"
+                )
+            for view_index, view in enumerate(views):
+                if not isinstance(view, dict) or not view.get("input_image"):
+                    raise ValueError(
+                        f"Dataset sample {sample.get('id', index)!r} view {view_index} "
+                        "must provide input_image"
+                    )
 
     def _validate_paths(self) -> None:
         paths = [("source_gaussian_ply", self.source_gaussian_ply)]
         for index, sample in enumerate(self.samples):
             sample_id = sample.get("id", index)
-            paths.append((f"sample {sample_id} input_image", self._resolve_path(sample["input_image"])))
+            for view_index, view in enumerate(sample["views"]):
+                paths.append(
+                    (
+                        f"sample {sample_id} view {view_index} input_image",
+                        self._resolve_path(view["input_image"]),
+                    )
+                )
             paths.append((f"sample {sample_id} target_gs", self._resolve_path(sample["target_gs"])))
 
         missing = [f"{name}: {path}" for name, path in paths if not path.is_file()]
@@ -110,11 +136,16 @@ class GaussianInjectionDataset(Dataset):
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         sample = self.samples[index]
+        input_images = [
+            str(self._resolve_path(view["input_image"])) for view in sample["views"]
+        ]
         return {
             "id": sample.get("id", str(index)),
             "source_features": self.source_features,
             "target_features": self._target_features[index],
-            "input_image": str(self._resolve_path(sample["input_image"])),
+            "views": input_images,
+            "input_images": input_images,
+            "input_image": input_images[0],
             "target_gs": str(self._resolve_path(sample["target_gs"])),
             "prompt": sample["prompt"],
         }
