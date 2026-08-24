@@ -6,6 +6,7 @@ dataset:
   name: low_light_injection
   root: "."
   num_views: 3
+  captions_json: "datasets/captions/captions.json"
   source_gaussian_ply: "../StereoGS/output/LLFF/office1_3views/point_cloud/iteration_30000/point_cloud.ply"
   samples:
     # Replace these example paths with the actual dataset files.
@@ -17,7 +18,7 @@ dataset:
       target_gs: "datasets/targets/office1_daylight/point_cloud.ply"
       camera_json: "../StereoGS/output/LLFF/office1_3views/cameras.json"
       camera_ids: [0, 1, 2]
-      prompt: "a brightly lit daytime scene"
+      caption_key: office1_daylight
 
     - id: office1_low_light
       views:
@@ -27,11 +28,11 @@ dataset:
       target_gs: "datasets/targets/office1_low_light/point_cloud.ply"
       camera_json: "../StereoGS/output/LLFF/office1_3views/cameras.json"
       camera_ids: [0, 1, 2]
-      prompt: "a low-light indoor scene"
+      caption_key: office1_low_light
 
   validation:
     require_input_image: true
     require_target_gs: true
-    require_prompt: true
+    require_caption: true
     require_matching_gaussian_count: true
     require_matching_sh_shape: true

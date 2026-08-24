@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, List
+import json
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -46,6 +47,17 @@ class GaussianInjectionDataset(Dataset):
             raise ValueError("dataset.source_gaussian_ply must be provided")
         self.source_gaussian_ply = self._resolve_path(source_value)
 
+        captions_value = dataset_config.get("captions_json", "")
+        self.captions = {}
+        if captions_value:
+            captions_path = self._resolve_path(captions_value)
+            if not captions_path.is_file():
+                raise FileNotFoundError(f"Captions JSON not found: {captions_path}")
+            with captions_path.open("r", encoding="utf-8") as file:
+                self.captions = json.load(file)
+            if not isinstance(self.captions, dict):
+                raise ValueError("dataset.captions_json must contain a JSON object")
+
         samples = dataset_config.get("samples", [])
         if not samples:
             raise ValueError("dataset.samples must contain at least one sample")
@@ -87,13 +99,15 @@ class GaussianInjectionDataset(Dataset):
         required_fields = []
         if validation.get("require_target_gs", True):
             required_fields.append("target_gs")
-        if validation.get("require_prompt", True):
-            required_fields.append("prompt")
 
         for index, sample in enumerate(self.samples):
             if not isinstance(sample, dict):
                 raise ValueError(f"Dataset sample {index} must be a mapping")
             missing = [field for field in required_fields if not sample.get(field)]
+            if validation.get("require_caption", False):
+                caption_key = sample.get("caption_key", sample.get("id", index))
+                if caption_key not in self.captions and not sample.get("prompt"):
+                    missing.append("caption_key")
             if missing:
                 raise ValueError(
                     f"Dataset sample {sample.get('id', index)!r} is missing: {', '.join(missing)}"
@@ -155,6 +169,12 @@ class GaussianInjectionDataset(Dataset):
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         sample = self.samples[index]
+        caption_key = sample.get("caption_key", sample.get("id", str(index)))
+        prompt = self.captions.get(caption_key, sample.get("prompt"))
+        if not prompt:
+            raise ValueError(
+                f"Sample {sample.get('id', index)!r} has no caption for key {caption_key!r}"
+            )
         input_images = [
             str(self._resolve_path(view["input_image"])) for view in sample["views"]
         ]
@@ -171,7 +191,7 @@ class GaussianInjectionDataset(Dataset):
                 if sample.get("camera_json") else None
             ),
             "camera_ids": sample.get("camera_ids"),
-            "prompt": sample["prompt"],
+            "prompt": prompt,
         }
 
 

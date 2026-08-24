@@ -1,4 +1,5 @@
-'''
+''' extract_frames.py
+For Video Dataset
 Extracts frames from a video file and saves them as images in a specified output directory.
 '''
 
@@ -10,7 +11,19 @@ import argparse
 from tqdm import tqdm
 
 def extract_frames(video_path, output_dir, num_views=3):
-    pass
+    '''
+    Expected output directory structure
+    output_dir/
+        scene1_view1.jpg
+        scene1_view2.jpg
+        scene1_view3.jpg
+        scene2_view1.jpg
+        scene2_view2.jpg
+        scene2_view3.jpg
+        ...
+    '''
+        
+    os.makedirs(output_dir, exist_ok=True)
 
 def main():
     parser = argparse.ArgumentParser(description="Extract frames from video dataset.")
