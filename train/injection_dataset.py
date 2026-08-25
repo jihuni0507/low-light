@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 import json
 
+import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import DataLoader, Dataset
 import yaml
@@ -9,11 +11,11 @@ import yaml
 from models.gaussians_model import GaussianModel
 
 
-NUM_VIEWS = 3
+NUM_VIEWS = 5
 
 
 class GaussianInjectionDataset(Dataset):
-    """Dataset where exactly three input views define one reconstruction scene."""
+    """Dataset where exactly five input views define one reconstruction scene."""
 
     def __init__(
         self,
@@ -69,25 +71,6 @@ class GaussianInjectionDataset(Dataset):
             self._validate_paths()
 
         self.source_features = self._load_features(self.source_gaussian_ply)
-        self.source_geometry = self._load_geometry(self.source_gaussian_ply)
-        self._target_features: Dict[int, torch.Tensor] = {}
-        for index, sample in enumerate(self.samples):
-            target_path = self._resolve_path(sample["target_gs"])
-            target_features = self._load_features(target_path)
-            if target_features.shape != self.source_features.shape:
-                raise ValueError(
-                    f"Sample {sample.get('id', index)!r} has incompatible SH shape: "
-                    f"source={tuple(self.source_features.shape)}, "
-                    f"target={tuple(target_features.shape)}"
-                )
-            target_geometry = self._load_geometry(target_path)
-            for name in self.source_geometry:
-                if not torch.allclose(self.source_geometry[name], target_geometry[name], atol=1e-5, rtol=1e-5):
-                    raise ValueError(
-                        f"Sample {sample.get('id', index)!r} target geometry does not match "
-                        f"source geometry in '{name}'"
-                    )
-            self._target_features[index] = target_features
 
     def _resolve_path(self, value: str) -> Path:
         path = Path(value)
@@ -96,27 +79,26 @@ class GaussianInjectionDataset(Dataset):
         return path.resolve()
 
     def _validate_sample_schema(self, validation: Dict[str, Any]) -> None:
-        required_fields = []
-        if validation.get("require_target_gs", True):
-            required_fields.append("target_gs")
-
         for index, sample in enumerate(self.samples):
             if not isinstance(sample, dict):
                 raise ValueError(f"Dataset sample {index} must be a mapping")
-            missing = [field for field in required_fields if not sample.get(field)]
-            if validation.get("require_caption", False):
-                caption_key = sample.get("caption_key", sample.get("id", index))
-                if caption_key not in self.captions and not sample.get("prompt"):
-                    missing.append("caption_key")
-            if missing:
-                raise ValueError(
-                    f"Dataset sample {sample.get('id', index)!r} is missing: {', '.join(missing)}"
-                )
             views = sample.get("views")
             if not isinstance(views, list) or len(views) != NUM_VIEWS:
                 raise ValueError(
                     f"Dataset sample {sample.get('id', index)!r} must contain exactly "
                     f"{NUM_VIEWS} views"
+                )
+            missing = []
+            if validation.get("require_prompt", validation.get("require_caption", False)):
+                prompt = sample.get("prompt")
+                prompt_key = sample.get("prompt_key")
+                if not prompt and prompt_key:
+                    prompt = self.captions.get(prompt_key)
+                if not isinstance(prompt, str) or not prompt.strip():
+                    missing.append("prompt")
+            if missing:
+                raise ValueError(
+                    f"Dataset sample {sample.get('id', index)!r} is missing: {', '.join(missing)}"
                 )
             for view_index, view in enumerate(views):
                 if not isinstance(view, dict) or not view.get("input_image"):
@@ -136,7 +118,6 @@ class GaussianInjectionDataset(Dataset):
                         self._resolve_path(view["input_image"]),
                     )
                 )
-            paths.append((f"sample {sample_id} target_gs", self._resolve_path(sample["target_gs"])))
             if sample.get("camera_json"):
                 paths.append((f"sample {sample_id} camera_json", self._resolve_path(sample["camera_json"])))
 
@@ -156,42 +137,47 @@ class GaussianInjectionDataset(Dataset):
             raise ValueError(f"SH features contain NaN or infinity: {path}")
         return features.cpu()
 
-    def _load_geometry(self, path: Path) -> Dict[str, torch.Tensor]:
-        model = GaussianModel(sh_degree=self.sh_degree)
-        model.load_ply(path)
-        return {
-            name: value.detach().cpu().clone()
-            for name, value in model.get_geometry().items()
-        }
+    def _load_target_image(self, path: Path) -> torch.Tensor:
+        with Image.open(path) as image:
+            image_rgb = image.convert("RGB")
+            image_tensor = torch.from_numpy(
+                np.array(image_rgb, dtype="float32")
+            ).permute(2, 0, 1).contiguous() / 255.0
+        if not torch.isfinite(image_tensor).all():
+            raise ValueError(f"Pseudo-GT image contains NaN or infinity: {path}")
+        return image_tensor
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         sample = self.samples[index]
-        caption_key = sample.get("caption_key", sample.get("id", str(index)))
-        prompt = self.captions.get(caption_key, sample.get("prompt"))
-        if not prompt:
-            raise ValueError(
-                f"Sample {sample.get('id', index)!r} has no caption for key {caption_key!r}"
-            )
+        prompt = sample.get("prompt")
+        prompt_key = sample.get("prompt_key")
+        if not prompt and prompt_key:
+            prompt = self.captions.get(prompt_key)
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError(f"Sample {sample.get('id', index)!r} has no text prompt")
         input_images = [
             str(self._resolve_path(view["input_image"])) for view in sample["views"]
+        ]
+        target_images = [
+            self._load_target_image(Path(image_path))
+            for image_path in input_images
         ]
         return {
             "id": sample.get("id", str(index)),
             "source_features": self.source_features,
-            "target_features": self._target_features[index],
             "views": input_images,
             "input_images": input_images,
             "input_image": input_images[0],
-            "target_gs": str(self._resolve_path(sample["target_gs"])),
+            "target_images": target_images,
             "camera_json": (
                 str(self._resolve_path(sample["camera_json"]))
                 if sample.get("camera_json") else None
             ),
             "camera_ids": sample.get("camera_ids"),
-            "prompt": prompt,
+            "prompt": prompt.strip(),
         }
 
 
@@ -226,6 +212,6 @@ def build_injection_dataloader(
 
 
 def encode_prompt_batch(batch: List[Dict[str, Any]], encoder, device: str) -> torch.Tensor:
-    """Encode all prompts in one DataLoader batch with the shared CLIP encoder."""
+    """Encode one text transformation prompt per scene."""
     prompts = [sample["prompt"] for sample in batch]
     return encoder.encode_text(prompts).to(device=device, dtype=torch.float32)

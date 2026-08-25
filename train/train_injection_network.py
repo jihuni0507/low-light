@@ -36,7 +36,7 @@ class TrainConfig:
     save_dir: str = "./output/injection"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     seed: int = 42
-    lambda_sh: float = 1.0
+    lambda_sh: float = 0.0
     lambda_image: float = 1.0
     lambda_ssim: float = 0.2
 
@@ -55,7 +55,7 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--save_dir", type=str, default="./output/injection", help="Directory to save the trained injection network.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Training device, e.g. cuda or cpu.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
-    parser.add_argument("--lambda_sh", type=float, default=1.0, help="Weight of SH feature MSE.")
+    parser.add_argument("--lambda_sh", type=float, default=0.0, help="Deprecated; pseudo-GT image training has no target SH loss.")
     parser.add_argument("--lambda_image", type=float, default=1.0, help="Weight of rendered-image L1 loss.")
     parser.add_argument("--lambda_ssim", type=float, default=0.2, help="Weight of rendered-image SSIM loss.")
     return TrainConfig(**vars(parser.parse_args()))
@@ -115,14 +115,6 @@ def ssim_loss(predicted, target, window_size=11):
     return 1.0 - (numerator / (denominator + 1e-8)).mean()
 
 
-def render_teacher_images(model, cameras, pipeline, background):
-    with torch.no_grad():
-        return [
-            stereogs_render(camera, model, pipeline, background, train=False)["render"].detach()
-            for camera in cameras
-        ]
-
-
 def render_image_loss(model, cameras, target_images, pipeline, background):
     terms = []
     for camera, target_image in zip(cameras, target_images):
@@ -138,6 +130,10 @@ def main():
     config = parse_args()
     set_seed(config.seed)
     device = torch.device(config.device)
+    if config.lambda_sh != 0:
+        raise ValueError("--lambda_sh must be 0: pseudo-GT image training has no target Gaussian SH.")
+    if config.lambda_image <= 0 and config.lambda_ssim <= 0:
+        raise ValueError("At least one image loss weight must be greater than 0.")
 
     encoder = CLIPEncoder(model_name=config.clip_model, device=str(device))
     dataloader = build_injection_dataloader(
@@ -171,7 +167,7 @@ def main():
     source_model = None
     pipeline = SimpleNamespace(convert_SHs_python=False, compute_cov3D_python=False, debug=False)
     background = torch.zeros(3, device=device)
-    if config.lambda_image > 0:
+    if config.lambda_image > 0 or config.lambda_ssim > 0:
         if device.type != "cuda":
             raise ValueError("StereoGS rendered hybrid loss requires a CUDA device.")
         source_model = StereoGaussianModel(config.sh_degree)
@@ -185,13 +181,15 @@ def main():
             cameras = load_render_cameras(
                 camera_json, dataset_sample["camera_ids"], device
             )
-            target_model = StereoGaussianModel(config.sh_degree)
-            target_model.load_ply(dataset_sample["target_gs"])
-            render_cache[dataset_sample["id"]] = (
-                cameras,
-                render_teacher_images(target_model, cameras, pipeline, background),
-            )
-            del target_model
+            target_images = [image.to(device) for image in dataset_sample["target_images"]]
+            for camera, target_image in zip(cameras, target_images):
+                if target_image.shape[-2:] != (camera.image_height, camera.image_width):
+                    raise ValueError(
+                        f"Pseudo-GT image shape {tuple(target_image.shape[-2:])} does not match "
+                        f"camera shape {(camera.image_height, camera.image_width)} for sample "
+                        f"{dataset_sample['id']!r}"
+                    )
+            render_cache[dataset_sample["id"]] = (cameras, target_images)
 
     for epoch in range(config.epochs):
         net.train()
@@ -204,17 +202,15 @@ def main():
 
             for sample, condition in zip(batch, conditions):
                 source_features = sample["source_features"].to(device)
-                target_features = sample["target_features"].to(device)
                 predicted = net(source_features, condition)
-                total_loss = config.lambda_sh * F.mse_loss(predicted, target_features)
-                if config.lambda_image > 0:
-                    cameras, target_images = render_cache[sample["id"]]
-                    source_model._features_dc = predicted[:, :1, :]
-                    source_model._features_rest = predicted[:, 1:, :]
-                    image_l1, image_ssim = render_image_loss(
-                        source_model, cameras, target_images, pipeline, background
-                    )
-                    total_loss = total_loss + config.lambda_image * image_l1
+                cameras, target_images = render_cache[sample["id"]]
+                source_model._features_dc = predicted[:, :1, :]
+                source_model._features_rest = predicted[:, 1:, :]
+                image_l1, image_ssim = render_image_loss(
+                    source_model, cameras, target_images, pipeline, background
+                )
+                total_loss = config.lambda_image * image_l1
+                if config.lambda_ssim > 0:
                     total_loss = total_loss + config.lambda_ssim * image_ssim
                 batch_loss = batch_loss + total_loss
 

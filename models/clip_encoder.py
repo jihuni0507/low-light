@@ -80,6 +80,25 @@ class CLIPEncoder:
             return "transformers"
         return "none"
 
+    def _normalize_features(self, output, modality: str) -> torch.Tensor:
+        if isinstance(output, torch.Tensor):
+            features = output
+        else:
+            feature_name = f"{modality}_embeds"
+            features = getattr(output, feature_name, None)
+            if features is None:
+                pooled = getattr(output, "pooler_output", None)
+                if pooled is None:
+                    hidden = getattr(output, "last_hidden_state", None)
+                    if hidden is None:
+                        raise TypeError(
+                            f"Unsupported CLIP {modality} output type: {type(output).__name__}"
+                        )
+                    pooled = hidden[:, 0]
+                projection = getattr(self.model, f"{modality}_projection", None)
+                features = projection(pooled) if projection is not None else pooled
+        return features / features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
     @torch.no_grad()
     def encode_text(self, texts: Union[str, Sequence[str]]) -> torch.Tensor:
         if isinstance(texts, str):
@@ -93,9 +112,9 @@ class CLIPEncoder:
 
         text_inputs = self.processor(text=list(texts), return_tensors="pt", padding=True)
         text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
-        embeddings = self.model.get_text_features(**text_inputs)
-        embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
-        return embeddings
+        return self._normalize_features(
+            self.model.get_text_features(**text_inputs), "text"
+        )
 
     @torch.no_grad()
     def encode_image(self, image: Union[str, Image.Image, torch.Tensor]) -> torch.Tensor:
@@ -122,9 +141,9 @@ class CLIPEncoder:
 
         processed = self.processor(images=image, return_tensors="pt")
         processed = {k: v.to(self.device) for k, v in processed.items()}
-        embeddings = self.model.get_image_features(**processed)
-        embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
-        return embeddings
+        return self._normalize_features(
+            self.model.get_image_features(**processed), "image"
+        )
 
 
 def encode_text(texts: Union[str, Sequence[str]], model_name: str = "ViT-B-32") -> torch.Tensor:

@@ -145,8 +145,33 @@ def run_injection(config, root_dir, condition_vec, train=True):
 
     model, source_features = prepare_gaussian_input(config, root_dir, device)
     sh_degree = model.max_sh_degree
-    target_path = resolve_path(injection_cfg.get("target_ply", ""), root_dir)
-    if target_path and os.path.exists(target_path):
+
+    checkpoint_path = resolve_path(
+        injection_cfg.get("checkpoint", "output/injection/injection_network.pt"),
+        root_dir,
+    )
+    checkpoint = None
+    if not train:
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(
+                f"Injection checkpoint not found: {checkpoint_path}. "
+                "Run once with --train True first."
+            )
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+
+    net = ConditionedGaussianSHNet(
+        condition_dim=checkpoint.get("condition_dim", condition_vec.shape[-1]) if checkpoint else condition_vec.shape[-1],
+        sh_channels=3,
+        hidden_dim=checkpoint.get("hidden_dim", int(injection_cfg.get("hidden_dim", 256))) if checkpoint else int(injection_cfg.get("hidden_dim", 256)),
+    ).to(device)
+
+    if train:
+        target_path = resolve_path(injection_cfg.get("target_ply", ""), root_dir)
+        if not target_path or not os.path.isfile(target_path):
+            raise ValueError(
+                "main.py training requires injection.target_ply. Use "
+                "train/train_injection_network.py for pseudo-GT image training."
+            )
         target_model = GaussianModel(sh_degree=sh_degree)
         target_model.load_ply(target_path)
         target_model.to(device)
@@ -156,22 +181,6 @@ def run_injection(config, root_dir, condition_vec, train=True):
                 "Target Gaussian feature shape must match the StereoGS source: "
                 f"source={tuple(source_features.shape)}, target={tuple(target_features.shape)}"
             )
-        if not torch.isfinite(target_features).all():
-            raise ValueError("Target Gaussian SH features contain NaN or infinite values.")
-    else:
-        target_features = source_features.clone()
-
-    net = ConditionedGaussianSHNet(
-        condition_dim=condition_vec.shape[-1],
-        sh_channels=3,
-        hidden_dim=int(injection_cfg.get("hidden_dim", 256)),
-    ).to(device)
-
-    checkpoint_path = resolve_path(
-        injection_cfg.get("checkpoint", "output/injection/injection_network.pt"),
-        root_dir,
-    )
-    if train:
         optimizer = torch.optim.Adam(net.parameters(), lr=float(injection_cfg.get("learning_rate", 1e-4)))
 
         for epoch in range(int(injection_cfg.get("epochs", 10))):
@@ -194,12 +203,6 @@ def run_injection(config, root_dir, condition_vec, train=True):
         )
         print(f"Injection network checkpoint saved to: {checkpoint_path}")
     else:
-        if not os.path.isfile(checkpoint_path):
-            raise FileNotFoundError(
-                f"Injection checkpoint not found: {checkpoint_path}. "
-                "Run once with --train True first."
-            )
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
         state_dict = checkpoint.get("model_state_dict", checkpoint)
         net.load_state_dict(state_dict)
         net.eval()
