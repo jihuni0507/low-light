@@ -1,0 +1,31 @@
+# Dataset for text-conditioned Gaussian SH injection.
+# The input Gaussian PLY is shared by all samples. Each sample provides
+# inverse-ISP pseudo-GT images and one transformation prompt per sample.
+
+dataset:
+  name: low_light_injection
+  root: "."
+  num_views: 5
+  source_gaussian_ply: "../StereoGS/output/LLFF/point_cloud/iteration_30000/point_cloud.ply"
+  samples:
+    # Replace these example paths with the actual dataset files.
+    - id: musharna
+      views:
+        - input_image: "/home/work/test2/datasets/darken/target_view1.jpg"
+        - input_image: "/home/work/test2/datasets/darken/target_view2.jpg"
+        # - input_image: "/home/work/test2/datasets/darken/target_view3.jpg"
+        - input_image: "/home/work/test2/datasets/darken/target_view4.jpg"
+        - input_image: "/home/work/test2/datasets/darken/target_view5.jpg"
+        - input_image: "/home/work/test2/datasets/darken/target_view5.jpg"
+      camera_json: "../StereoGS/output/LLFF/cameras.json"
+      camera_ids: [0, 1, 2, 3, 4]
+      prompt: "low-light"
+
+    # Add another five-view sample here when needed.
+
+  validation:
+    require_input_image: true
+    require_target_gs: false
+    require_prompt: true
+    require_matching_gaussian_count: true
+    require_matching_sh_shape: true

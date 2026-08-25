@@ -119,32 +119,24 @@ class GaussianModel:
         num_points = xyz.shape[0]
         
         # Prepare vertex array
+        rest_fields = [
+            ('f_rest_{}'.format(i), 'f4')
+            for i in range(features_rest.shape[1] * features_rest.shape[2])
+        ]
         vertices = np.zeros(num_points, dtype=[
             ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-            ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'),
             ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
             ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4'),
-            ('f_rest_0', 'f4'), ('f_rest_1', 'f4'), ('f_rest_2', 'f4'),
-            ('f_rest_3', 'f4'), ('f_rest_4', 'f4'), ('f_rest_5', 'f4'),
-            ('f_rest_6', 'f4'), ('f_rest_7', 'f4'), ('f_rest_8', 'f4'),
-            ('f_rest_9', 'f4'), ('f_rest_10', 'f4'), ('f_rest_11', 'f4'),
-            ('f_rest_13', 'f4'), ('f_rest_14', 'f4'), ('f_rest_15', 'f4'),
+            *rest_fields,
             ('scale_0', 'f4'), ('scale_1', 'f4'), ('scale_2', 'f4'),
             ('rot_0', 'f4'), ('rot_1', 'f4'), ('rot_2', 'f4'), ('rot_3', 'f4'),
             ('opacity', 'f4'),
-            ('sh_degree', 'u1'),
         ])
         
         # Fill vertex data
         vertices['x'] = xyz[:, 0]
         vertices['y'] = xyz[:, 1]
         vertices['z'] = xyz[:, 2]
-        
-        # Convert DC feature to RGB
-        dc_rgb = (features_dc[:, 0, :] * 255).astype(np.uint8)
-        vertices['red'] = dc_rgb[:, 0]
-        vertices['green'] = dc_rgb[:, 1]
-        vertices['blue'] = dc_rgb[:, 2]
         
         # Normal placeholder
         vertices['nx'] = 0
@@ -156,10 +148,9 @@ class GaussianModel:
         vertices['f_dc_1'] = features_dc[:, 0, 1]
         vertices['f_dc_2'] = features_dc[:, 0, 2]
         
-        # Rest features (up to degree 3)
-        n_rest = features_rest.shape[1]
-        for i in range(min(n_rest, 15)):
-            vertices[f'f_rest_{i}'] = features_rest[:, i, 0] if i < features_rest.shape[1] else 0
+        rest_flat = features_rest.transpose(0, 2, 1).reshape(num_points, -1)
+        for i, field_name in enumerate(name for name in vertices.dtype.names if name.startswith('f_rest_')):
+            vertices[field_name] = rest_flat[:, i]
         
         # Geometry
         vertices['scale_0'] = scaling[:, 0]
@@ -172,8 +163,6 @@ class GaussianModel:
         vertices['rot_3'] = rotation[:, 3]
         
         vertices['opacity'] = opacity[:, 0]
-        vertices['sh_degree'] = self.active_sh_degree
-        
         # Write PLY file manually (simple binary PLY writer)
         self._write_ply(path, vertices)
     
@@ -228,19 +217,19 @@ class GaussianModel:
         dc = np.stack([vertices['f_dc_0'], vertices['f_dc_1'], vertices['f_dc_2']], axis=1)
         self._features_dc = nn.Parameter(torch.from_numpy(dc).float().to(device).unsqueeze(1))
         
-        # Load rest features
         n_rest = (self.max_sh_degree + 1) ** 2 - 1
-        rest_data = []
-        for i in range(n_rest):
-            if f'f_rest_{i}' in vertices.dtype.names:
-                rest_data.append(vertices[f'f_rest_{i}'])
-            else:
-                rest_data.append(np.zeros_like(vertices['f_dc_0']))
-        
-        rest = np.stack(rest_data, axis=1)
-        # Reshape to (N, n_rest, 3) - need to handle this properly
+        rest_names = [name for name in vertices.dtype.names if name.startswith('f_rest_')]
+        rest_names.sort(key=lambda name: int(name.rsplit('_', 1)[1]))
+        expected_rest = 3 * n_rest
+        if len(rest_names) != expected_rest:
+            raise ValueError(
+                f'Expected {expected_rest} f_rest fields for SH degree {self.max_sh_degree}, '
+                f'found {len(rest_names)}.'
+            )
+        rest = np.stack([vertices[name] for name in rest_names], axis=1)
+        rest = rest.reshape(-1, 3, n_rest).transpose(0, 2, 1)
         self._features_rest = nn.Parameter(
-            torch.from_numpy(rest).float().to(device).unsqueeze(-1).expand(-1, -1, 3)
+            torch.from_numpy(rest).float().to(device)
         )
         
         if 'sh_degree' in vertices.dtype.names:
@@ -274,7 +263,7 @@ class GaussianModel:
             
             # Read binary data
             dtype = np.dtype(dtype_list)
-            data = np.frombuffer(f.read(n_vertices * dtype.itemsize), dtype=dtype)
+            data = np.frombuffer(f.read(n_vertices * dtype.itemsize), dtype=dtype).copy()
             
         return data
     

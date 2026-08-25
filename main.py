@@ -20,6 +20,16 @@ def load_config(config_path: str):
     return config
 
 
+def resolve_device(config):
+    configured_device = config.get("global", {}).get(
+        "device", "cuda" if torch.cuda.is_available() else "cpu"
+    )
+    if str(configured_device).startswith("cuda") and not torch.cuda.is_available():
+        print("CUDA is unavailable in this PyTorch environment; using CPU.")
+        return "cpu"
+    return configured_device
+
+
 def resolve_path(path_value, root_dir):
     if not path_value:
         return ""
@@ -27,6 +37,17 @@ def resolve_path(path_value, root_dir):
     if path.is_absolute():
         return str(path)
     return str((root_dir / path).resolve())
+
+
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Expected a boolean value, got: {value}")
 
 
 def run_base_training(config, root_dir):
@@ -57,7 +78,7 @@ def run_base_training(config, root_dir):
 
 def encode_clip_condition(config, root_dir):
     clip_cfg = config.get("clip", {})
-    device = config.get("global", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(config)
     encoder = CLIPEncoder(model_name=clip_cfg.get("model_name", "openai/clip-vit-base-patch32"), device=device)
 
     text_prompt = clip_cfg.get("text_prompt", "")
@@ -73,52 +94,122 @@ def encode_clip_condition(config, root_dir):
     return cond.squeeze(0).to(device)
 
 
-def run_injection_training(config, root_dir, condition_vec):
+def prepare_gaussian_input(config, root_dir, device):
+    """Load a StereoGS PLY and prepare SH features for injection."""
     injection_cfg = config.get("injection", {})
     train_cfg = config.get("train", {})
-    device = config.get("global", {}).get("device", "cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device(device)
     sh_degree = int(train_cfg.get("sh_degree", 3))
 
-    gaussian_ply = resolve_path(injection_cfg.get("gaussian_ply", "output/base_gaussian_last.pt"), root_dir)
-    if gaussian_ply.endswith(".pt"):
-        raise ValueError("Injection pipeline expects a Gaussian .ply file, not a checkpoint .pt file.")
-    if not os.path.exists(gaussian_ply):
+    gaussian_ply_value = injection_cfg.get("gaussian_ply", "")
+    if not gaussian_ply_value:
+        raise ValueError("injection.gaussian_ply must point to a StereoGS PLY file.")
+
+    gaussian_ply = Path(resolve_path(gaussian_ply_value, root_dir))
+    if gaussian_ply.suffix.lower() != ".ply":
+        raise ValueError(
+            f"Expected a StereoGS .ply file, got: {gaussian_ply}"
+        )
+    if not gaussian_ply.is_file():
         raise FileNotFoundError(f"Gaussian PLY file not found: {gaussian_ply}")
 
     model = GaussianModel(sh_degree=sh_degree)
     model.load_ply(gaussian_ply)
     model.to(device)
-    model.freeze_geometry()
 
-    source_features = model.get_features.to(device)
-    target_path = resolve_path(injection_cfg.get("target_ply", ""), root_dir)
-    if target_path and os.path.exists(target_path):
+    expected_coefficients = (sh_degree + 1) ** 2
+    features = model.get_features
+    if features.ndim != 3 or features.shape[1:] != (expected_coefficients, 3):
+        raise ValueError(
+            "Loaded Gaussian SH shape mismatch: "
+            f"expected (N, {expected_coefficients}, 3), got {tuple(features.shape)}"
+        )
+    if not torch.isfinite(features).all():
+        raise ValueError("Loaded Gaussian SH features contain NaN or infinite values.")
+
+    if bool(injection_cfg.get("freeze_geometry", True)):
+        model.freeze_geometry()
+
+    # Detach the loaded features so only the injection network receives gradients.
+    source_features = features.detach().to(device=device, dtype=torch.float32)
+    print(
+        f"Loaded {features.shape[0]} Gaussians from {gaussian_ply} "
+        f"with SH shape {tuple(features.shape)}"
+    )
+    return model, source_features
+
+
+def run_injection(config, root_dir, condition_vec, train=True):
+    injection_cfg = config.get("injection", {})
+    device = resolve_device(config)
+    device = torch.device(device)
+
+    model, source_features = prepare_gaussian_input(config, root_dir, device)
+    sh_degree = model.max_sh_degree
+
+    checkpoint_path = resolve_path(
+        injection_cfg.get("checkpoint", "output/injection/injection_network.pt"),
+        root_dir,
+    )
+    checkpoint = None
+    if not train:
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(
+                f"Injection checkpoint not found: {checkpoint_path}. "
+                "Run once with --train True first."
+            )
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+
+    net = ConditionedGaussianSHNet(
+        condition_dim=checkpoint.get("condition_dim", condition_vec.shape[-1]) if checkpoint else condition_vec.shape[-1],
+        sh_channels=3,
+        hidden_dim=checkpoint.get("hidden_dim", int(injection_cfg.get("hidden_dim", 256))) if checkpoint else int(injection_cfg.get("hidden_dim", 256)),
+    ).to(device)
+
+    if train:
+        target_path = resolve_path(injection_cfg.get("target_ply", ""), root_dir)
+        if not target_path or not os.path.isfile(target_path):
+            raise ValueError(
+                "main.py training requires injection.target_ply. Use "
+                "train/train_injection_network.py for pseudo-GT image training."
+            )
         target_model = GaussianModel(sh_degree=sh_degree)
         target_model.load_ply(target_path)
         target_model.to(device)
-        target_features = target_model.get_features.to(device)
+        target_features = target_model.get_features.detach().to(device=device, dtype=torch.float32)
+        if target_features.shape != source_features.shape:
+            raise ValueError(
+                "Target Gaussian feature shape must match the StereoGS source: "
+                f"source={tuple(source_features.shape)}, target={tuple(target_features.shape)}"
+            )
+        optimizer = torch.optim.Adam(net.parameters(), lr=float(injection_cfg.get("learning_rate", 1e-4)))
+
+        for epoch in range(int(injection_cfg.get("epochs", 10))):
+            net.train()
+            optimizer.zero_grad()
+            predicted = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
+            loss = F.mse_loss(predicted, target_features)
+            loss.backward()
+            optimizer.step()
+            print(f"epoch={epoch + 1}/{injection_cfg.get('epochs', 10)} loss={loss.item():.6f}")
+
+        Path(checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "model_state_dict": net.state_dict(),
+                "condition_dim": condition_vec.shape[-1],
+                "hidden_dim": int(injection_cfg.get("hidden_dim", 256)),
+            },
+            checkpoint_path,
+        )
+        print(f"Injection network checkpoint saved to: {checkpoint_path}")
     else:
-        target_features = source_features.clone()
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        net.load_state_dict(state_dict)
+        net.eval()
+        print(f"Loaded injection network checkpoint: {checkpoint_path}")
 
-    net = ConditionedGaussianSHNet(
-        condition_dim=condition_vec.shape[-1],
-        sh_channels=3,
-        hidden_dim=int(injection_cfg.get("hidden_dim", 256)),
-    ).to(device)
-
-    optimizer = torch.optim.Adam(net.parameters(), lr=float(injection_cfg.get("learning_rate", 1e-4)))
-
-    for epoch in range(int(injection_cfg.get("epochs", 10))):
-        net.train()
-        optimizer.zero_grad()
-        predicted = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
-        loss = F.mse_loss(predicted, target_features)
-        loss.backward()
-        optimizer.step()
-        print(f"epoch={epoch + 1}/{injection_cfg.get('epochs', 10)} loss={loss.item():.6f}")
-
-    updated = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
+    with torch.no_grad():
+        updated = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
     model.set_features(updated[:, :1, :], updated[:, 1:, :])
 
     output_ply = resolve_path(injection_cfg.get("output_ply", "output/injection_updated_gaussians.ply"), root_dir)
@@ -132,6 +223,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description="YAML-driven pipeline orchestrator for Gaussian reconstruction and CLIP-conditioned SH injection.")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to the pipeline YAML file.")
     parser.add_argument("--stage", type=str, default="all", choices=["all", "base", "clip", "injection"], help="Pipeline stage to run.")
+    parser.add_argument("--train", type=parse_bool, default=True, help="Train the injection network; use --train False for inference.")
     return parser
 
 
@@ -161,8 +253,9 @@ def main():
     if args.stage in ("all", "injection") and pipeline_cfg.get("run_injection", False):
         if condition_vec is None:
             condition_vec = encode_clip_condition(config, root_dir)
-        print("[3/3] Running SH injection training...")
-        run_injection_training(config, root_dir, condition_vec)
+        mode = "training" if args.train else "inference"
+        print(f"[3/3] Running SH injection {mode}...")
+        run_injection(config, root_dir, condition_vec, train=args.train)
 
     print("Pipeline complete.")
 
