@@ -94,7 +94,11 @@ def load_render_cameras(camera_json, camera_ids, device):
     with open(camera_json, "r", encoding="utf-8") as file:
         entries = json.load(file)
     by_id = {int(entry["id"]): entry for entry in entries}
-    selected_ids = camera_ids if camera_ids is not None else sorted(by_id)[:3]
+    selected_ids = camera_ids if camera_ids is not None else sorted(by_id)[:5]
+    if len(selected_ids) != 5:
+        raise ValueError(
+            f"Expected exactly 5 cameras for a sample, got {len(selected_ids)}"
+        )
     missing = [camera_id for camera_id in selected_ids if int(camera_id) not in by_id]
     if missing:
         raise ValueError(f"Camera ids not found in {camera_json}: {missing}")
@@ -164,15 +168,14 @@ def main():
     save_dir.mkdir(parents=True, exist_ok=True)
 
     render_cache = {}
-    source_model = None
     pipeline = SimpleNamespace(convert_SHs_python=False, compute_cov3D_python=False, debug=False)
     background = torch.zeros(3, device=device)
     if config.lambda_image > 0 or config.lambda_ssim > 0:
         if device.type != "cuda":
             raise ValueError("StereoGS rendered hybrid loss requires a CUDA device.")
-        source_model = StereoGaussianModel(config.sh_degree)
-        source_model.load_ply(dataloader.dataset.source_gaussian_ply)
         for dataset_index, dataset_sample in enumerate(dataloader.dataset):
+            source_model = StereoGaussianModel(config.sh_degree)
+            source_model.load_ply(dataset_sample["source_gaussian_ply"])
             camera_json = dataset_sample["camera_json"]
             if not camera_json:
                 raise ValueError(
@@ -189,7 +192,7 @@ def main():
                         f"camera shape {(camera.image_height, camera.image_width)} for sample "
                         f"{dataset_sample['id']!r}"
                     )
-            render_cache[dataset_sample["id"]] = (cameras, target_images)
+            render_cache[dataset_sample["id"]] = (source_model, cameras, target_images)
 
     for epoch in range(config.epochs):
         net.train()
@@ -203,7 +206,7 @@ def main():
             for sample, condition in zip(batch, conditions):
                 source_features = sample["source_features"].to(device)
                 predicted = net(source_features, condition)
-                cameras, target_images = render_cache[sample["id"]]
+                source_model, cameras, target_images = render_cache[sample["id"]]
                 source_model._features_dc = predicted[:, :1, :]
                 source_model._features_rest = predicted[:, 1:, :]
                 image_l1, image_ssim = render_image_loss(

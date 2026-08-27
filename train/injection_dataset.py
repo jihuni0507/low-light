@@ -44,11 +44,6 @@ class GaussianInjectionDataset(Dataset):
             root = self.dataset_yaml.parent / root
         self.root = root.resolve()
 
-        source_value = dataset_config.get("source_gaussian_ply", "")
-        if not source_value:
-            raise ValueError("dataset.source_gaussian_ply must be provided")
-        self.source_gaussian_ply = self._resolve_path(source_value)
-
         captions_value = dataset_config.get("captions_json", "")
         self.captions = {}
         if captions_value:
@@ -70,7 +65,10 @@ class GaussianInjectionDataset(Dataset):
         if validate_paths:
             self._validate_paths()
 
-        self.source_features = self._load_features(self.source_gaussian_ply)
+        self.sample_source_features = [
+            self._load_features(self._resolve_path(sample["source_gaussian_ply"]))
+            for sample in self.samples
+        ]
 
     def _resolve_path(self, value: str) -> Path:
         path = Path(value)
@@ -87,6 +85,17 @@ class GaussianInjectionDataset(Dataset):
                 raise ValueError(
                     f"Dataset sample {sample.get('id', index)!r} must contain exactly "
                     f"{NUM_VIEWS} views"
+                )
+            if not sample.get("source_gaussian_ply"):
+                raise ValueError(
+                    f"Dataset sample {sample.get('id', index)!r} must provide "
+                    "source_gaussian_ply"
+                )
+            camera_ids = sample.get("camera_ids")
+            if camera_ids is not None and len(camera_ids) != NUM_VIEWS:
+                raise ValueError(
+                    f"Dataset sample {sample.get('id', index)!r} must provide exactly "
+                    f"{NUM_VIEWS} camera_ids when camera_ids is specified"
                 )
             missing = []
             if validation.get("require_prompt", validation.get("require_caption", False)):
@@ -108,9 +117,15 @@ class GaussianInjectionDataset(Dataset):
                     )
 
     def _validate_paths(self) -> None:
-        paths = [("source_gaussian_ply", self.source_gaussian_ply)]
+        paths = []
         for index, sample in enumerate(self.samples):
             sample_id = sample.get("id", index)
+            paths.append(
+                (
+                    f"sample {sample_id} source_gaussian_ply",
+                    self._resolve_path(sample["source_gaussian_ply"]),
+                )
+            )
             for view_index, view in enumerate(sample["views"]):
                 paths.append(
                     (
@@ -167,7 +182,10 @@ class GaussianInjectionDataset(Dataset):
         ]
         return {
             "id": sample.get("id", str(index)),
-            "source_features": self.source_features,
+            "source_gaussian_ply": str(
+                self._resolve_path(sample["source_gaussian_ply"])
+            ),
+            "source_features": self.sample_source_features[index],
             "views": input_images,
             "input_images": input_images,
             "input_image": input_images[0],

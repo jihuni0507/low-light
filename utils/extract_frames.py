@@ -82,8 +82,8 @@ def extract_frames(video_path, output_dir, num_views=5, center_frame=None, frame
 
 def main():
     parser = argparse.ArgumentParser(description="Extract frames from video dataset.")
-    parser.add_argument("--video_path", type=str, required=True, help="Path to the directory with input video files.")
-    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save extracted frames.")
+    parser.add_argument("--video_path", type=str, default='/home/work/test2/video', help="Path to the directory with input video files.")
+    parser.add_argument("--output_dir", type=str, default='/home/work/test2/datasets', help="Directory to save extracted frames.")
     parser.add_argument("--num_views", type=int, default=5, help="Number of views to extract (default: 5).")
     parser.add_argument(
         "--center_frame",
