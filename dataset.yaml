@@ -1,26 +1,312 @@
-# Dataset for text-conditioned Gaussian SH injection.
-# Each sample owns one Gaussian PLY and exactly five corresponding views.
-
 dataset:
-  name: low_light_injection
-  root: "."
+  name: musharna_low_light
+  root: .
   num_views: 5
   samples:
-    # Replace these example paths with the actual dataset files.
-    - id: musharna
-      source_gaussian_ply: "../StereoGS/output/LLFF/point_cloud/iteration_30000/point_cloud.ply"
-      views:
-        - input_image: "/home/work/test2/datasets/darken/target_view1.jpg"
-        - input_image: "/home/work/test2/datasets/darken/target_view2.jpg"
-        - input_image: "/home/work/test2/datasets/darken/target_view3.jpg"
-        - input_image: "/home/work/test2/datasets/darken/target_view4.jpg"
-        - input_image: "/home/work/test2/datasets/darken/target_view5.jpg"
-      camera_json: "../StereoGS/output/LLFF/cameras.json"
-      camera_ids: [0, 1, 2, 3, 4]
-      prompt: "low-light"
-
-    # Add another sample with its own source_gaussian_ply and five views here.
-
+  - id: musharna_1
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_1_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_1/target_view1.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_1/target_view27.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_1/target_view45.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_1/target_view63.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_1/target_view81.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_1_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_2
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_2_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_2/target_view100.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_2/target_view28.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_2/target_view46.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_2/target_view64.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_2/target_view82.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_2_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_3
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_3_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_3/target_view101.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_3/target_view29.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_3/target_view47.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_3/target_view65.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_3/target_view83.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_3_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_4
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_4_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_4/target_view11.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_4/target_view3.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_4/target_view48.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_4/target_view66.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_4/target_view84.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_4_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_5
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_5_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_5/target_view12.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_5/target_view30.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_5/target_view49.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_5/target_view67.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_5/target_view85.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_5_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_6
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_6_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_6/target_view13.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_6/target_view31.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_6/target_view5.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_6/target_view68.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_6/target_view86.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_6_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_7
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_7_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_7/target_view14.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_7/target_view32.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_7/target_view50.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_7/target_view69.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_7/target_view87.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_7_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_8
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_8_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_8/target_view15.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_8/target_view33.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_8/target_view51.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_8/target_view7.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_8/target_view88.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_8_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_9
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_9_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_9/target_view16.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_9/target_view34.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_9/target_view52.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_9/target_view70.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_9/target_view89.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_9_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_10
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_10_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_10/target_view17.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_10/target_view35.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_10/target_view53.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_10/target_view71.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_10/target_view9.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_10_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_11
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_11_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_11/target_view18.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_11/target_view36.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_11/target_view54.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_11/target_view72.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_11/target_view90.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_11_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_12
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_12_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_12/target_view19.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_12/target_view37.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_12/target_view55.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_12/target_view73.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_12/target_view91.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_12_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_13
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_13_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_13/target_view2.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_13/target_view38.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_13/target_view56.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_13/target_view74.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_13/target_view92.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_13_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_14
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_14_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_14/target_view20.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_14/target_view39.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_14/target_view57.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_14/target_view75.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_14/target_view93.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_14_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_15
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_15_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_15/target_view21.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_15/target_view4.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_15/target_view58.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_15/target_view76.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_15/target_view94.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_15_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_16
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_16_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_16/target_view22.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_16/target_view40.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_16/target_view59.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_16/target_view77.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_16/target_view95.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_16_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_17
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_17_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_17/target_view23.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_17/target_view41.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_17/target_view6.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_17/target_view78.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_17/target_view96.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_17_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_18
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_18_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_18/target_view24.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_18/target_view42.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_18/target_view60.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_18/target_view79.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_18/target_view97.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_18_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
+  - id: musharna_19
+    source_gaussian_ply: /home/work/test2/StereoGS/output/LLFF/musharna_19_5views/point_cloud/iteration_30000/point_cloud.ply
+    views:
+    - input_image: /home/work/test2/datasets/darken/musharna_19/target_view25.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_19/target_view43.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_19/target_view61.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_19/target_view8.jpg
+    - input_image: /home/work/test2/datasets/darken/musharna_19/target_view98.jpg
+    camera_json: /home/work/test2/StereoGS/output/LLFF/musharna_19_5views/cameras.json
+    camera_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    prompt: low-light scene
   validation:
     require_input_image: true
     require_target_gs: false

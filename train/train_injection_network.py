@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,9 @@ from types import SimpleNamespace
 
 import torch
 import torch.nn.functional as F
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
 
 from models.clip_encoder import CLIPEncoder
 from models.injection_network import ConditionedGaussianSHNet
@@ -65,6 +69,32 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def setup_distributed(config):
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    distributed = world_size > 1
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+    if config.device.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is required for rendered Gaussian training.")
+        torch.cuda.set_device(local_rank)
+        device = torch.device("cuda", local_rank)
+    else:
+        if distributed:
+            raise ValueError("Distributed training requires a CUDA device.")
+        device = torch.device(config.device)
+
+    if distributed:
+        dist.init_process_group(backend="nccl")
+
+    return distributed, local_rank, device
+
+
+def cleanup_distributed(distributed):
+    if distributed and dist.is_initialized():
+        dist.destroy_process_group()
 
 
 def make_camera(camera_entry, device):
@@ -130,10 +160,33 @@ def render_image_loss(model, cameras, target_images, pipeline, background):
     return l1, ssim
 
 
+def load_render_sample(dataset_sample, sh_degree, device):
+    source_model = StereoGaussianModel(sh_degree)
+    source_model.load_ply(dataset_sample["source_gaussian_ply"])
+    camera_json = dataset_sample["camera_json"]
+    if not camera_json:
+        raise ValueError(
+            f"Sample {dataset_sample['id']!r} requires camera_json for rendered loss."
+        )
+
+    cameras = load_render_cameras(
+        camera_json, dataset_sample["camera_ids"], device
+    )
+    target_images = [image.to(device) for image in dataset_sample["target_images"]]
+    for camera, target_image in zip(cameras, target_images):
+        if target_image.shape[-2:] != (camera.image_height, camera.image_width):
+            raise ValueError(
+                f"Pseudo-GT image shape {tuple(target_image.shape[-2:])} does not match "
+                f"camera shape {(camera.image_height, camera.image_width)} for sample "
+                f"{dataset_sample['id']!r}"
+            )
+    return source_model, cameras, target_images
+
+
 def main():
     config = parse_args()
     set_seed(config.seed)
-    device = torch.device(config.device)
+    distributed, rank, device = setup_distributed(config)
     if config.lambda_sh != 0:
         raise ValueError("--lambda_sh must be 0: pseudo-GT image training has no target Gaussian SH.")
     if config.lambda_image <= 0 and config.lambda_ssim <= 0:
@@ -148,6 +201,16 @@ def main():
         num_workers=config.num_workers,
         device="cpu",
     )
+    sampler = DistributedSampler(dataloader.dataset, shuffle=True) if distributed else None
+    if sampler is not None:
+        dataloader = torch.utils.data.DataLoader(
+            dataloader.dataset,
+            batch_size=config.batch_size,
+            sampler=sampler,
+            num_workers=config.num_workers,
+            collate_fn=dataloader.collate_fn,
+            pin_memory=False,
+        )
 
     condition_dim = encoder.feature_dim
     if config.condition_dim != condition_dim:
@@ -161,52 +224,40 @@ def main():
         sh_channels=3,
         hidden_dim=config.hidden_dim,
     ).to(device)
+    if distributed:
+        net = DDP(net, device_ids=[rank], output_device=rank)
 
     optimizer = torch.optim.Adam(net.parameters(), lr=config.learning_rate)
 
     save_dir = Path(config.save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
+    if not distributed or rank == 0:
+        save_dir.mkdir(parents=True, exist_ok=True)
+    if distributed:
+        dist.barrier()
 
-    render_cache = {}
     pipeline = SimpleNamespace(convert_SHs_python=False, compute_cov3D_python=False, debug=False)
     background = torch.zeros(3, device=device)
     if config.lambda_image > 0 or config.lambda_ssim > 0:
         if device.type != "cuda":
             raise ValueError("StereoGS rendered hybrid loss requires a CUDA device.")
-        for dataset_index, dataset_sample in enumerate(dataloader.dataset):
-            source_model = StereoGaussianModel(config.sh_degree)
-            source_model.load_ply(dataset_sample["source_gaussian_ply"])
-            camera_json = dataset_sample["camera_json"]
-            if not camera_json:
-                raise ValueError(
-                    f"Sample {dataset_sample['id']!r} requires camera_json for rendered loss."
-                )
-            cameras = load_render_cameras(
-                camera_json, dataset_sample["camera_ids"], device
-            )
-            target_images = [image.to(device) for image in dataset_sample["target_images"]]
-            for camera, target_image in zip(cameras, target_images):
-                if target_image.shape[-2:] != (camera.image_height, camera.image_width):
-                    raise ValueError(
-                        f"Pseudo-GT image shape {tuple(target_image.shape[-2:])} does not match "
-                        f"camera shape {(camera.image_height, camera.image_width)} for sample "
-                        f"{dataset_sample['id']!r}"
-                    )
-            render_cache[dataset_sample["id"]] = (source_model, cameras, target_images)
+        print("Rendering is enabled; scenes will be loaded one at a time.")
 
     for epoch in range(config.epochs):
         net.train()
         epoch_loss = 0.0
+        if sampler is not None:
+            sampler.set_epoch(epoch)
 
         for batch in dataloader:
-            optimizer.zero_grad()
             conditions = encode_prompt_batch(batch, encoder, device=str(device))
-            batch_loss = torch.zeros((), device=device)
 
             for sample, condition in zip(batch, conditions):
+                optimizer.zero_grad()
                 source_features = sample["source_features"].to(device)
                 predicted = net(source_features, condition)
-                source_model, cameras, target_images = render_cache[sample["id"]]
+                source_model, cameras, target_images = load_render_sample(
+                    sample, config.sh_degree, device
+                )
                 source_model._features_dc = predicted[:, :1, :]
                 source_model._features_rest = predicted[:, 1:, :]
                 image_l1, image_ssim = render_image_loss(
@@ -215,27 +266,33 @@ def main():
                 total_loss = config.lambda_image * image_l1
                 if config.lambda_ssim > 0:
                     total_loss = total_loss + config.lambda_ssim * image_ssim
-                batch_loss = batch_loss + total_loss
+                total_loss.backward()
+                optimizer.step()
+                epoch_loss += total_loss.item()
 
-            batch_loss = batch_loss / len(batch)
-            batch_loss.backward()
-            optimizer.step()
-            epoch_loss += batch_loss.item()
+                del total_loss, image_l1, image_ssim
+                del predicted, source_features, source_model, cameras, target_images
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
 
-        mean_loss = epoch_loss / len(dataloader)
+        mean_loss = epoch_loss / len(dataloader.dataset)
         print(f"epoch={epoch + 1}/{config.epochs} loss={mean_loss:.6f}")
 
-    checkpoint_path = save_dir / "injection_network.pt"
-    torch.save(
-        {
-            "model_state_dict": net.state_dict(),
-            "condition_dim": condition_dim,
-            "hidden_dim": config.hidden_dim,
-            "sh_degree": config.sh_degree,
-        },
-        checkpoint_path,
-    )
-    print(f"Saved injection network to: {checkpoint_path}")
+    if not distributed or rank == 0:
+        checkpoint_path = save_dir / "injection_network.pt"
+        state_dict = net.module.state_dict() if distributed else net.state_dict()
+        torch.save(
+            {
+                "model_state_dict": state_dict,
+                "condition_dim": condition_dim,
+                "hidden_dim": config.hidden_dim,
+                "sh_degree": config.sh_degree,
+            },
+            checkpoint_path,
+        )
+        print(f"Saved injection network to: {checkpoint_path}")
+
+    cleanup_distributed(distributed)
 
 
 if __name__ == "__main__":
