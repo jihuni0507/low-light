@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 
 
 class ConditionedGaussianSHNet(nn.Module):
@@ -19,12 +20,16 @@ class ConditionedGaussianSHNet(nn.Module):
         sh_channels: int = 3,
         hidden_dim: int = 256,
         num_sh_coeffs: int | None = None,
+        gaussian_chunk_size: int = 16384,
+        gradient_checkpointing: bool = True,
     ):
         super().__init__()
         self.condition_dim = condition_dim
         self.sh_channels = sh_channels
         self.hidden_dim = hidden_dim
         self.num_sh_coeffs = num_sh_coeffs
+        self.gaussian_chunk_size = gaussian_chunk_size
+        self.gradient_checkpointing = gradient_checkpointing
 
         self.condition_mlp = nn.Sequential(
             nn.Linear(condition_dim, hidden_dim),
@@ -95,13 +100,33 @@ class ConditionedGaussianSHNet(nn.Module):
         num_gaussians = gaussian_features.shape[0]
         condition = self._prepare_condition(condition, num_gaussians)
 
-        gaussian_emb = self.gaussian_mlp(gaussian_features)
         cond_emb = self.condition_mlp(condition)
         cond_emb = cond_emb.unsqueeze(1).expand(-1, gaussian_features.shape[1], -1)
 
-        mixed = torch.cat([gaussian_emb, cond_emb], dim=-1)
-        hidden = self.feature_mixer(mixed)
-        delta_sh = self.output_layer(hidden)
+        def forward_chunk(features, condition_embedding):
+            gaussian_emb = self.gaussian_mlp(features)
+            mixed = torch.cat([gaussian_emb, condition_embedding], dim=-1)
+            hidden = self.feature_mixer(mixed)
+            return self.output_layer(hidden)
+
+        chunk_size = max(1, int(self.gaussian_chunk_size))
+        delta_chunks = []
+        for start in range(0, num_gaussians, chunk_size):
+            end = start + chunk_size
+            feature_chunk = gaussian_features[start:end]
+            condition_chunk = cond_emb[start:end]
+            if self.training and self.gradient_checkpointing:
+                delta_chunk = checkpoint(
+                    forward_chunk,
+                    feature_chunk,
+                    condition_chunk,
+                    use_reentrant=False,
+                )
+            else:
+                delta_chunk = forward_chunk(feature_chunk, condition_chunk)
+            delta_chunks.append(delta_chunk)
+
+        delta_sh = torch.cat(delta_chunks, dim=0)
 
         updated_sh = gaussian_features + delta_sh
 

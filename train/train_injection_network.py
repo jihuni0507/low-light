@@ -35,6 +35,8 @@ class TrainConfig:
     clip_model: str = "openai/clip-vit-base-patch32"
     condition_dim: int = 512
     hidden_dim: int = 256
+    gaussian_chunk_size: int = 16384
+    gradient_checkpointing: bool = True
     epochs: int = 10
     learning_rate: float = 1e-4
     save_dir: str = "./output/injection"
@@ -54,6 +56,8 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--clip_model", type=str, default="openai/clip-vit-base-patch32", help="CLIP model name.")
     parser.add_argument("--condition_dim", type=int, default=512, help="Dimension of the CLIP embedding.")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension for the injection network.")
+    parser.add_argument("--gaussian_chunk_size", type=int, default=16384, help="Number of Gaussians processed per checkpointed forward chunk.")
+    parser.add_argument("--gradient_checkpointing", action=argparse.BooleanOptionalAction, default=True, help="Recompute chunk activations during backward to reduce GPU memory.")
     parser.add_argument("--epochs", type=int, default=10, help="Number of epochs.")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate.")
     parser.add_argument("--save_dir", type=str, default="./output/injection", help="Directory to save the trained injection network.")
@@ -223,6 +227,8 @@ def main():
         condition_dim=condition_dim,
         sh_channels=3,
         hidden_dim=config.hidden_dim,
+        gaussian_chunk_size=config.gaussian_chunk_size,
+        gradient_checkpointing=config.gradient_checkpointing,
     ).to(device)
     if distributed:
         net = DDP(net, device_ids=[rank], output_device=rank)
