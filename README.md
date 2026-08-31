@@ -48,9 +48,9 @@ bright source Gaussian PLY + 5 inverse-ISP pseudo-GT views + prompt
 | `camera_ids` | 렌더링할 camera id 목록. 생략하면 첫 5개 사용 |
 | `prompt` | 적용할 appearance 변환 방향 텍스트 |
 
-    밝은 입력 Gaussian PLY는 동일한 장면을 기준으로 여러 변형 조건을 학습할 수
-있도록 `dataset.source_gaussian_ply`에 공통 경로로 기록한다. 각 샘플의
-`views`에는 source reconstruction과 대응하는 pseudo-GT 이미지를 기록한다.
+    각 샘플은 자신의 밝은 입력 Gaussian PLY와 대응하는 pseudo-GT view 5장을
+  함께 가진다. 서로 다른 장면을 추가할 때는 샘플마다 `source_gaussian_ply`를
+  별도로 기록한다.
 
 권장 디렉터리 구조:
 
@@ -73,9 +73,9 @@ dataset:
   name: low_light_injection
   root: "."
   num_views: 5
-  source_gaussian_ply: "../StereoGS/output/LLFF/office1_5views/point_cloud/iteration_30000/point_cloud.ply"
   samples:
     - id: office1_low_light
+      source_gaussian_ply: "../StereoGS/output/LLFF/office1_5views/point_cloud/iteration_30000/point_cloud.ply"
       views:
         - input_image: "datasets/inputs/office1_dark_view1.png"
         - input_image: "datasets/inputs/office1_dark_view2.png"
