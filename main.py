@@ -6,6 +6,8 @@ import torch
 import torch.nn.functional as F
 import yaml
 from accelerate import Accelerator
+import numpy as np
+from scipy.spatial import cKDTree
 
 from models.clip_encoder import CLIPEncoder
 from models.gaussians_model import GaussianModel
@@ -138,6 +140,117 @@ def prepare_gaussian_input(config, root_dir, device):
     return model, source_features
 
 
+def find_nearest_gaussians(xyz_positions, k=16, metric='euclidean'):
+    """Find k nearest neighbors for each Gaussian using KD-tree.
+    
+    Args:
+        xyz_positions: Tensor of shape (N, 3) containing Gaussian positions
+        k: Number of nearest neighbors to find
+        metric: Distance metric ('euclidean' or 'l2')
+    
+    Returns:
+        indices: Array of shape (N, k) containing neighbor indices
+        distances: Array of shape (N, k) containing neighbor distances
+    """
+    xyz_np = xyz_positions.cpu().numpy()
+    tree = cKDTree(xyz_np)
+    # k+1 because the query point itself is included
+    distances, indices = tree.query(xyz_np, k=k+1)
+    # Remove the first column (self) and keep only k neighbors
+    return indices[:, 1:k+1], distances[:, 1:k+1]
+
+
+def normalize_sh_channels(sh_features, eps=1e-6):
+    """Normalize SH features per-channel to reduce color bias.
+    
+    Args:
+        sh_features: Tensor of shape (N, K, 3) where K is number of SH coefficients
+    
+    Returns:
+        normalized: Same shape as input, with per-channel normalization
+    """
+    # Compute mean and std per channel across all Gaussians and SH coefficients
+    mean = sh_features.mean(dim=(0, 1), keepdim=True)  # (1, 1, 3)
+    std = sh_features.std(dim=(0, 1), keepdim=True)    # (1, 1, 3)
+    
+    # Normalize per channel
+    normalized = (sh_features - mean) / (std + eps)
+    
+    # Scale back to approximately original range
+    normalized = normalized * std + mean
+    
+    return normalized
+
+
+def apply_spatial_smoothing_post_hoc(sh_features, xyz_positions, 
+                                     k_neighbors=16, 
+                                     smoothing_lambda=0.1,
+                                     num_iterations=3):
+    """Apply spatial smoothing to SH features after network inference.
+    
+    Encourages similar Gaussians (in spatial proximity) to have similar SH values.
+    
+    Args:
+        sh_features: Tensor of shape (N, K, 3) - updated SH features from network
+        xyz_positions: Tensor of shape (N, 3) - Gaussian positions
+        k_neighbors: Number of neighbors to consider
+        smoothing_lambda: Weight of smoothing loss (higher = more smoothing)
+        num_iterations: Number of smoothing iterations
+    
+    Returns:
+        smoothed_features: Spatially smoothed SH features
+    """
+    device = sh_features.device
+    xyz_positions = xyz_positions.to(device)
+    
+    # Find k nearest neighbors
+    neighbor_indices, neighbor_distances = find_nearest_gaussians(xyz_positions, k=k_neighbors)
+    neighbor_indices = torch.from_numpy(neighbor_indices).long().to(device)
+    neighbor_distances = torch.from_numpy(neighbor_distances).float().to(device)
+    
+    # Compute spatial weights (closer neighbors have higher weight)
+    # Use inverse distance weighting
+    neighbor_distances = torch.clamp(neighbor_distances, min=1e-8)
+    spatial_weights = 1.0 / neighbor_distances  # (N, K)
+    spatial_weights = spatial_weights / spatial_weights.sum(dim=1, keepdim=True)  # Normalize
+    
+    smoothed_features = sh_features.clone()
+    
+    # Iteratively apply smoothing
+    for iteration in range(num_iterations):
+        # Get neighbor features for each Gaussian
+        neighbor_features = smoothed_features[neighbor_indices]  # (N, K, K_sh, 3)
+        
+        # Compute weighted average of neighbor features
+        # neighbor_features: (N, K_neighbors, K_sh_coeffs, 3)
+        # spatial_weights: (N, K_neighbors)
+        weighted_avg = (
+            neighbor_features * spatial_weights.view(neighbor_features.shape[0], neighbor_features.shape[1], 1, 1)
+        ).sum(dim=1)  # (N, K_sh_coeffs, 3)
+        
+        # Blend current features with neighbor average
+        smoothed_features = (1.0 - smoothing_lambda) * smoothed_features + smoothing_lambda * weighted_avg
+    
+    return smoothed_features
+
+
+def clip_sh_magnitude(sh_features, max_magnitude=0.5):
+    """Clip SH feature magnitudes to prevent extreme values.
+    
+    Helps avoid color oversaturation and channel bias.
+    
+    Args:
+        sh_features: Tensor of shape (N, K, 3)
+        max_magnitude: Maximum allowed magnitude per coefficient
+    
+    Returns:
+        clipped: Features with magnitudes clipped
+    """
+    magnitude = torch.norm(sh_features, dim=-1, keepdim=True)  # (N, K, 1)
+    scale = torch.clamp(magnitude / (max_magnitude + 1e-6), min=1.0)
+    return sh_features / scale
+
+
 def run_injection(config, root_dir, condition_vec, train=True):
     injection_cfg = config.get("injection", {})
     device = resolve_device(config)
@@ -210,6 +323,40 @@ def run_injection(config, root_dir, condition_vec, train=True):
 
     with torch.no_grad():
         updated = net(source_features, condition_vec.unsqueeze(0).expand(source_features.shape[0], -1))
+        
+        # Get inference-time smoothing parameters
+        inference_cfg = config.get("inference", {})
+        enable_smoothing = bool(inference_cfg.get("enable_spatial_smoothing", True))
+        smoothing_lambda = float(inference_cfg.get("smoothing_lambda", 0.1))
+        smoothing_neighbors = int(inference_cfg.get("smoothing_neighbors", 16))
+        smoothing_iterations = int(inference_cfg.get("smoothing_iterations", 3))
+        enable_magnitude_clipping = bool(inference_cfg.get("enable_magnitude_clipping", True))
+        max_magnitude = float(inference_cfg.get("max_magnitude", 0.5))
+        enable_channel_norm = bool(inference_cfg.get("enable_channel_normalization", True))
+        
+        # Apply spatial smoothing to reduce artifacts and discontinuities
+        if enable_smoothing:
+            print(f"Applying spatial smoothing (lambda={smoothing_lambda}, "
+                  f"neighbors={smoothing_neighbors}, iterations={smoothing_iterations})...")
+            xyz_positions = model.get_xyz
+            updated = apply_spatial_smoothing_post_hoc(
+                updated,
+                xyz_positions,
+                k_neighbors=smoothing_neighbors,
+                smoothing_lambda=smoothing_lambda,
+                num_iterations=smoothing_iterations
+            )
+        
+        # Apply per-channel normalization to reduce color bias
+        if enable_channel_norm:
+            print("Applying per-channel normalization to reduce color bias...")
+            updated = normalize_sh_channels(updated)
+        
+        # Clip magnitude to prevent oversaturation
+        if enable_magnitude_clipping:
+            print(f"Clipping SH magnitude to max={max_magnitude}...")
+            updated = clip_sh_magnitude(updated, max_magnitude=max_magnitude)
+    
     model.set_features(updated[:, :1, :], updated[:, 1:, :])
 
     output_ply = resolve_path(injection_cfg.get("output_ply", "output/injection_updated_gaussians.ply"), root_dir)

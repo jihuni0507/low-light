@@ -20,12 +20,6 @@
 Set-Location -Path "your/project/directory"
 $env:PYTHONPATH = "your/project/directory"
 ```
-### 🔶 `main.py`
-`config.yaml` 파일을 통해 실험 세부 설정을 할 수 있다.
-
-**🚫!!`yaml`파일 구성에 따라 달라질 수 있음!!🚫**
-- 실험 시나리오 별 `yaml`파일 생성하거나
-- Base `yaml` + 세부 `yaml` 모듈화 시도 중
 
 ### 🔶 Dataset 구성 가이드
 
@@ -130,6 +124,17 @@ Gaussian 개수가 sample마다 다를 수 있으므로 기본 `collate_fn`은 t
 loss를 계산한 뒤 평균을 내는 방식으로 학습한다. 모든 sample의 Gaussian 수가
 같은 경우에도 이 방식은 사용할 수 있으며, 추후 padding 기반 batch 연산으로
 최적화할 수 있다.
+
+---
+
+### 🔶 `main.py` : one-line command
+`config.yaml` 파일을 통해 실험 세부 설정을 할 수 있다.
+
+**🚫!!`yaml`파일 구성에 따라 달라질 수 있음!!🚫**
+- 실험 시나리오 별 `yaml`파일 생성하거나
+- Base `yaml` + 세부 `yaml` 모듈화 시도 중
+
+---
 
 **1) 전체 파이프라인 실행**
 ``` Bash
