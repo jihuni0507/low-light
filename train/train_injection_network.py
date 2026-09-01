@@ -12,6 +12,8 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
+from scipy.spatial import cKDTree
+import numpy as np
 
 from models.clip_encoder import CLIPEncoder
 from models.injection_network import ConditionedGaussianSHNet
@@ -45,6 +47,9 @@ class TrainConfig:
     lambda_sh: float = 0.0
     lambda_image: float = 1.0
     lambda_ssim: float = 0.2
+    lambda_spatial_smooth: float = 0.01
+    lambda_magnitude: float = 0.001
+    spatial_smooth_k: int = 16
 
 
 def parse_args() -> TrainConfig:
@@ -66,6 +71,9 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--lambda_sh", type=float, default=0.0, help="Deprecated; pseudo-GT image training has no target SH loss.")
     parser.add_argument("--lambda_image", type=float, default=1.0, help="Weight of rendered-image L1 loss.")
     parser.add_argument("--lambda_ssim", type=float, default=0.2, help="Weight of rendered-image SSIM loss.")
+    parser.add_argument("--lambda_spatial_smooth", type=float, default=0.01, help="Weight of spatial smoothness regularization loss.")
+    parser.add_argument("--lambda_magnitude", type=float, default=0.001, help="Weight of SH magnitude regularization loss.")
+    parser.add_argument("--spatial_smooth_k", type=int, default=16, help="Number of neighbors for spatial smoothness loss.")
     return TrainConfig(**vars(parser.parse_args()))
 
 
@@ -151,6 +159,91 @@ def ssim_loss(predicted, target, window_size=11):
     numerator = (2 * mean_pred * mean_target + c1) * (2 * covariance + c2)
     denominator = (mean_pred * mean_pred + mean_target * mean_target + c1) * (variance_pred + variance_target + c2)
     return 1.0 - (numerator / (denominator + 1e-8)).mean()
+
+
+def find_nearest_gaussians_train(xyz_positions, k=16):
+    """Find k nearest neighbors for each Gaussian during training.
+    
+    Args:
+        xyz_positions: Tensor of shape (N, 3) containing Gaussian positions
+        k: Number of nearest neighbors to find
+    
+    Returns:
+        indices: Tensor of shape (N, k) containing neighbor indices
+        distances: Tensor of shape (N, k) containing neighbor distances
+    """
+    device = xyz_positions.device
+    xyz_np = xyz_positions.detach().cpu().numpy()
+    tree = cKDTree(xyz_np)
+    distances, indices = tree.query(xyz_np, k=k+1)
+    
+    # Remove self (first column) and return as tensors
+    indices_tensor = torch.from_numpy(indices[:, 1:k+1]).long().to(device)
+    distances_tensor = torch.from_numpy(distances[:, 1:k+1]).float().to(device)
+    
+    return indices_tensor, distances_tensor
+
+
+def spatial_smoothness_loss(predicted_sh, xyz_positions, k_neighbors=16, lambda_smooth=0.01):
+    """Compute spatial smoothness regularization loss.
+    
+    Encourages neighboring Gaussians to have similar SH values.
+    
+    Args:
+        predicted_sh: Tensor of shape (N, K, 3) - predicted SH features
+        xyz_positions: Tensor of shape (N, 3) - Gaussian positions
+        k_neighbors: Number of neighbors to consider
+        lambda_smooth: Loss weight
+    
+    Returns:
+        loss: Scalar spatial smoothness loss
+    """
+    device = predicted_sh.device
+    
+    # Find k nearest neighbors
+    neighbor_indices, neighbor_distances = find_nearest_gaussians_train(xyz_positions, k=k_neighbors)
+    
+    # Compute spatial weights (closer neighbors have higher weight)
+    neighbor_distances = torch.clamp(neighbor_distances, min=1e-8)
+    spatial_weights = 1.0 / neighbor_distances  # (N, K)
+    spatial_weights = spatial_weights / spatial_weights.sum(dim=1, keepdim=True)  # Normalize
+    
+    # Get neighbor features
+    neighbor_features = predicted_sh[neighbor_indices]  # (N, K_neighbors, K_sh, 3)
+    
+    # Compute weighted average of neighbor features
+    weighted_avg = (
+        neighbor_features * spatial_weights.view(-1, neighbor_features.shape[1], 1, 1)
+    ).sum(dim=1)  # (N, K_sh, 3)
+    
+    # Smoothness loss: penalize difference between current and neighbor average
+    smooth_loss = F.mse_loss(predicted_sh, weighted_avg)
+    
+    return lambda_smooth * smooth_loss
+
+
+def sh_magnitude_loss(predicted_sh, lambda_magnitude=0.001):
+    """Compute SH magnitude regularization to prevent oversaturation.
+    
+    Args:
+        predicted_sh: Tensor of shape (N, K, 3)
+        lambda_magnitude: Loss weight
+    
+    Returns:
+        loss: Scalar magnitude loss
+    """
+    # Compute L2 norm per coefficient
+    magnitude = torch.norm(predicted_sh, dim=-1)  # (N, K)
+    
+    # Penalize large magnitudes (except DC component which is indices 0)
+    # DC component (index 0) can be larger; higher order terms should be smaller
+    dc_magnitude = magnitude[:, :1].mean()  # Average DC component magnitude
+    rest_magnitude = magnitude[:, 1:].mean()  # Average rest component magnitude
+    
+    # Encourage rest components to be smaller than DC
+    mag_loss = F.relu(rest_magnitude - dc_magnitude)
+    
+    return lambda_magnitude * mag_loss
 
 
 def render_image_loss(model, cameras, target_images, pipeline, background):
@@ -272,6 +365,22 @@ def main():
                 total_loss = config.lambda_image * image_l1
                 if config.lambda_ssim > 0:
                     total_loss = total_loss + config.lambda_ssim * image_ssim
+                
+                # Add spatial smoothness regularization
+                if config.lambda_spatial_smooth > 0:
+                    xyz_positions = source_model.get_xyz
+                    smooth_loss = spatial_smoothness_loss(
+                        predicted, xyz_positions, 
+                        k_neighbors=config.spatial_smooth_k,
+                        lambda_smooth=config.lambda_spatial_smooth
+                    )
+                    total_loss = total_loss + smooth_loss
+                
+                # Add magnitude regularization to prevent color bias
+                if config.lambda_magnitude > 0:
+                    mag_loss = sh_magnitude_loss(predicted, lambda_magnitude=config.lambda_magnitude)
+                    total_loss = total_loss + mag_loss
+                
                 total_loss.backward()
                 optimizer.step()
                 epoch_loss += total_loss.item()

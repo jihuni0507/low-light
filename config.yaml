@@ -28,10 +28,10 @@ clip:
 
 injection:
   # StereoGS writes: <model_path>/point_cloud/iteration_<N>/point_cloud.ply
-  gaussian_ply: "../StereoGS/output/LLFF/point_cloud/iteration_30000/point_cloud.ply"
+  gaussian_ply: "/home/work/test2/StereoGS/output/LLFF/musharna_1_5views/point_cloud/iteration_30000/point_cloud.ply"
   target_ply: ""
-  output_ply: "output/injection/injected_gaussians.ply"
-  checkpoint: "output/injection/injection_network.pt"
+  output_ply: "output/injection/injected_gaussians_3.ply"
+  checkpoint: "output/injection_musharna_ddp/injection_network.pt"
   learning_rate: 0.0001
   epochs: 10
   hidden_dim: 256

@@ -5,4 +5,5 @@ __pycache__/
 
 # Experiment outputs
 output/injection/*.pt
+output/injection/*.ply
 output/rendered/
