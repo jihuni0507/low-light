@@ -52,12 +52,7 @@ class ConditionedGaussianSHNet(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.exposure_head = nn.Linear(hidden_dim, 1)
-        self.saturation_head = nn.Linear(hidden_dim, sh_channels)
-        nn.init.zeros_(self.exposure_head.weight)
-        nn.init.zeros_(self.exposure_head.bias)
-        nn.init.zeros_(self.saturation_head.weight)
-        nn.init.zeros_(self.saturation_head.bias)
+        self.output_layer = nn.Linear(hidden_dim, sh_channels)
 
     def _prepare_condition(self, condition, num_gaussians: int):
         if condition is None:
@@ -82,26 +77,17 @@ class ConditionedGaussianSHNet(nn.Module):
 
         return condition
 
-    def forward(
-        self,
-        gaussian_features: torch.Tensor,
-        condition: torch.Tensor,
-        return_delta: bool = False,
-        return_gains: bool = False,
-    ):
+    def forward(self, gaussian_features: torch.Tensor, condition: torch.Tensor, return_delta: bool = False):
         """Condition Gaussian SH features with a CLIP vector.
 
         Args:
             gaussian_features: Tensor of shape (N, K, C) or (N, C)
             condition: Tensor of shape (D,) or (N, D)
             return_delta: if True, also return adjustment tensor
-            return_gains: if True, also return exposure and saturation gains
 
         Returns:
             updated_sh: same shape as gaussian_features
             delta_sh: optional, shape same as gaussian_features
-            exposure_gain: optional, shape (N, K, 1)
-            saturation_gain: optional, shape (N, K, C)
         """
         if gaussian_features.dim() == 2:
             gaussian_features = gaussian_features.unsqueeze(1)
@@ -121,43 +107,31 @@ class ConditionedGaussianSHNet(nn.Module):
             gaussian_emb = self.gaussian_mlp(features)
             mixed = torch.cat([gaussian_emb, condition_embedding], dim=-1)
             hidden = self.feature_mixer(mixed)
-            exposure_logit = self.exposure_head(hidden)
-            saturation_logit = self.saturation_head(hidden)
-            exposure_gain = torch.exp(0.5 * torch.tanh(exposure_logit))
-            saturation_gain = 1.0 + 0.5 * torch.tanh(saturation_logit)
-            return exposure_gain, saturation_gain
+            return self.output_layer(hidden)
 
         chunk_size = max(1, int(self.gaussian_chunk_size))
-        exposure_chunks = []
-        saturation_chunks = []
+        delta_chunks = []
         for start in range(0, num_gaussians, chunk_size):
             end = start + chunk_size
             feature_chunk = gaussian_features[start:end]
             condition_chunk = cond_emb[start:end]
             if self.training and self.gradient_checkpointing:
-                gain_chunk = checkpoint(
+                delta_chunk = checkpoint(
                     forward_chunk,
                     feature_chunk,
                     condition_chunk,
                     use_reentrant=False,
                 )
             else:
-                gain_chunk = forward_chunk(feature_chunk, condition_chunk)
-            exposure_chunks.append(gain_chunk[0])
-            saturation_chunks.append(gain_chunk[1])
+                delta_chunk = forward_chunk(feature_chunk, condition_chunk)
+            delta_chunks.append(delta_chunk)
 
-        exposure_gain = torch.cat(exposure_chunks, dim=0)
-        saturation_gain = torch.cat(saturation_chunks, dim=0)
+        delta_sh = torch.cat(delta_chunks, dim=0)
 
-        updated_sh = gaussian_features * exposure_gain * saturation_gain
-        delta_sh = updated_sh - gaussian_features
+        updated_sh = gaussian_features + delta_sh
 
-        if return_delta and return_gains:
-            return updated_sh, delta_sh, exposure_gain, saturation_gain
         if return_delta:
             return updated_sh, delta_sh
-        if return_gains:
-            return updated_sh, exposure_gain, saturation_gain
         return updated_sh
 
     def inject_into_gaussian_model(self, gaussian_model, condition: torch.Tensor):

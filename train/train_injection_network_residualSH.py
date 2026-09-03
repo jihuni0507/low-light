@@ -12,7 +12,6 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from tqdm import tqdm
 from scipy.spatial import cKDTree
 import numpy as np
 
@@ -48,9 +47,6 @@ class TrainConfig:
     lambda_sh: float = 0.0
     lambda_image: float = 1.0
     lambda_ssim: float = 0.2
-    lambda_well_exposure: float = 0.1
-    lambda_well_saturated: float = 0.1
-    lambda_gain: float = 0.001
     lambda_spatial_smooth: float = 0.01
     lambda_magnitude: float = 0.001
     spatial_smooth_k: int = 16
@@ -75,9 +71,6 @@ def parse_args() -> TrainConfig:
     parser.add_argument("--lambda_sh", type=float, default=0.0, help="Deprecated; pseudo-GT image training has no target SH loss.")
     parser.add_argument("--lambda_image", type=float, default=1.0, help="Weight of rendered-image L1 loss.")
     parser.add_argument("--lambda_ssim", type=float, default=0.2, help="Weight of rendered-image SSIM loss.")
-    parser.add_argument("--lambda_well_exposure", type=float, default=0.1, help="Weight of differentiable well-exposure loss.")
-    parser.add_argument("--lambda_well_saturated", type=float, default=0.1, help="Weight of target chroma matching loss.")
-    parser.add_argument("--lambda_gain", type=float, default=0.001, help="Weight of gain identity regularization.")
     parser.add_argument("--lambda_spatial_smooth", type=float, default=0.01, help="Weight of spatial smoothness regularization loss.")
     parser.add_argument("--lambda_magnitude", type=float, default=0.001, help="Weight of SH magnitude regularization loss.")
     parser.add_argument("--spatial_smooth_k", type=int, default=16, help="Number of neighbors for spatial smoothness loss.")
@@ -168,29 +161,7 @@ def ssim_loss(predicted, target, window_size=11):
     return 1.0 - (numerator / (denominator + 1e-8)).mean()
 
 
-def well_exposure_loss(image, target_luminance=0.5, sigma=0.25):
-    """Penalize pixels whose luminance is far from the well-exposed midpoint."""
-    luminance = (
-        0.299 * image[:, 0:1]
-        + 0.587 * image[:, 1:2]
-        + 0.114 * image[:, 2:3]
-    )
-    score = torch.exp(-0.5 * ((luminance - target_luminance) / sigma) ** 2)
-    return 1.0 - score.mean()
-
-
-def chroma_magnitude(image):
-    """Return mean per-pixel L2 distance from the RGB mean."""
-    rgb_mean = image.mean(dim=1, keepdim=True)
-    return torch.sqrt(((image - rgb_mean) ** 2).mean(dim=1, keepdim=True) + 1e-8)
-
-
-def well_saturated_loss(predicted, target):
-    """Match predicted chroma magnitude to the target image's chroma magnitude."""
-    return F.l1_loss(chroma_magnitude(predicted), chroma_magnitude(target))
-
-
-def find_nearest_gaussians_train(xyz_positions, k=16, cache=None):
+def find_nearest_gaussians_train(xyz_positions, k=16):
     """Find k nearest neighbors for each Gaussian during training.
     
     Args:
@@ -202,33 +173,18 @@ def find_nearest_gaussians_train(xyz_positions, k=16, cache=None):
         distances: Tensor of shape (N, k) containing neighbor distances
     """
     device = xyz_positions.device
-    cache_key = (xyz_positions.data_ptr(), xyz_positions.shape[0], k)
-    if cache is not None and cache_key in cache:
-        indices, distances = cache[cache_key]
-        return indices.to(device), distances.to(device)
-
     xyz_np = xyz_positions.detach().cpu().numpy()
     tree = cKDTree(xyz_np)
-    distances, indices = tree.query(xyz_np, k=min(k + 1, xyz_np.shape[0]))
+    distances, indices = tree.query(xyz_np, k=k+1)
+    
     # Remove self (first column) and return as tensors
-    indices_tensor = torch.from_numpy(indices[:, 1:]).long()
-    distances_tensor = torch.from_numpy(distances[:, 1:]).float()
-
-    if cache is not None:
-        cache[cache_key] = (indices_tensor.cpu(), distances_tensor.cpu())
-
-    return indices_tensor.to(device), distances_tensor.to(device)
+    indices_tensor = torch.from_numpy(indices[:, 1:k+1]).long().to(device)
+    distances_tensor = torch.from_numpy(distances[:, 1:k+1]).float().to(device)
+    
+    return indices_tensor, distances_tensor
 
 
-def spatial_smoothness_loss(
-    predicted_sh,
-    xyz_positions,
-    k_neighbors=16,
-    lambda_smooth=0.01,
-    sample_ratio=0.25,
-    batch_size=128,
-    cache=None,
-):
+def spatial_smoothness_loss(predicted_sh, xyz_positions, k_neighbors=16, lambda_smooth=0.01):
     """Compute spatial smoothness regularization loss.
     
     Encourages neighboring Gaussians to have similar SH values.
@@ -244,34 +200,24 @@ def spatial_smoothness_loss(
     """
     device = predicted_sh.device
     
-    neighbor_indices, neighbor_distances = find_nearest_gaussians_train(
-        xyz_positions, k=k_neighbors, cache=cache
-    )
-
-    sample_count = max(1, int(predicted_sh.shape[0] * sample_ratio))
-    sample_indices = torch.randperm(predicted_sh.shape[0], device=device)[:sample_count]
-    neighbor_indices = neighbor_indices[sample_indices]
-    neighbor_distances = neighbor_distances[sample_indices]
-    sampled_sh = predicted_sh[sample_indices]
+    # Find k nearest neighbors
+    neighbor_indices, neighbor_distances = find_nearest_gaussians_train(xyz_positions, k=k_neighbors)
     
     # Compute spatial weights (closer neighbors have higher weight)
     neighbor_distances = torch.clamp(neighbor_distances, min=1e-8)
     spatial_weights = 1.0 / neighbor_distances  # (N, K)
     spatial_weights = spatial_weights / spatial_weights.sum(dim=1, keepdim=True)  # Normalize
     
-    smooth_loss = torch.zeros((), device=device)
-    for start in range(0, sample_count, batch_size):
-        end = min(start + batch_size, sample_count)
-        neighbor_features = predicted_sh[neighbor_indices[start:end]]
-        weighted_avg = (
-            neighbor_features
-            * spatial_weights[start:end].view(end - start, -1, 1, 1)
-        ).sum(dim=1)
-        smooth_loss = smooth_loss + F.mse_loss(
-            sampled_sh[start:end], weighted_avg
-        ) * (end - start)
-
-    smooth_loss = smooth_loss / sample_count
+    # Get neighbor features
+    neighbor_features = predicted_sh[neighbor_indices]  # (N, K_neighbors, K_sh, 3)
+    
+    # Compute weighted average of neighbor features
+    weighted_avg = (
+        neighbor_features * spatial_weights.view(-1, neighbor_features.shape[1], 1, 1)
+    ).sum(dim=1)  # (N, K_sh, 3)
+    
+    # Smoothness loss: penalize difference between current and neighbor average
+    smooth_loss = F.mse_loss(predicted_sh, weighted_avg)
     
     return lambda_smooth * smooth_loss
 
@@ -300,49 +246,15 @@ def sh_magnitude_loss(predicted_sh, lambda_magnitude=0.001):
     return lambda_magnitude * mag_loss
 
 
-def render_image_loss(
-    model,
-    cameras,
-    target_images,
-    pipeline,
-    background,
-    backward=False,
-    retain_graph_for_regularization=False,
-    lambda_image=1.0,
-    lambda_ssim=0.2,
-    lambda_well_exposure=0.1,
-    lambda_well_saturated=0.1,
-):
+def render_image_loss(model, cameras, target_images, pipeline, background):
     terms = []
-    view_count = len(cameras)
-    for view_index, (camera, target_image) in enumerate(zip(cameras, target_images)):
+    for camera, target_image in zip(cameras, target_images):
         predicted_image = stereogs_render(camera, model, pipeline, background, train=False)["render"].unsqueeze(0)
         target_image = target_image.unsqueeze(0)
-        image_l1 = F.l1_loss(predicted_image, target_image)
-        image_ssim = ssim_loss(predicted_image, target_image)
-        exposure = well_exposure_loss(predicted_image)
-        saturated = well_saturated_loss(predicted_image, target_image)
-        if backward:
-            view_loss = (
-                lambda_image * image_l1
-                + lambda_ssim * image_ssim
-                + lambda_well_exposure * exposure
-                + lambda_well_saturated * saturated
-            ) / view_count
-            view_loss.backward(
-                retain_graph=(
-                    view_index < view_count - 1
-                    or retain_graph_for_regularization
-                )
-            )
-            terms.append((image_l1.detach(), image_ssim.detach(), exposure.detach(), saturated.detach()))
-        else:
-            terms.append((image_l1, image_ssim, exposure, saturated))
+        terms.append((F.l1_loss(predicted_image, target_image), ssim_loss(predicted_image, target_image)))
     l1 = torch.stack([term[0] for term in terms]).mean()
     ssim = torch.stack([term[1] for term in terms]).mean()
-    exposure = torch.stack([term[2] for term in terms]).mean()
-    saturated = torch.stack([term[3] for term in terms]).mean()
-    return l1, ssim, exposure, saturated
+    return l1, ssim
 
 
 def load_render_sample(dataset_sample, sh_degree, device):
@@ -374,13 +286,8 @@ def main():
     distributed, rank, device = setup_distributed(config)
     if config.lambda_sh != 0:
         raise ValueError("--lambda_sh must be 0: pseudo-GT image training has no target Gaussian SH.")
-    if (
-        config.lambda_image <= 0
-        and config.lambda_ssim <= 0
-        and config.lambda_well_exposure <= 0
-        and config.lambda_well_saturated <= 0
-    ):
-        raise ValueError("At least one rendered image loss weight must be greater than 0.")
+    if config.lambda_image <= 0 and config.lambda_ssim <= 0:
+        raise ValueError("At least one image loss weight must be greater than 0.")
 
     encoder = CLIPEncoder(model_name=config.clip_model, device=str(device))
     dataloader = build_injection_dataloader(
@@ -429,13 +336,7 @@ def main():
 
     pipeline = SimpleNamespace(convert_SHs_python=False, compute_cov3D_python=False, debug=False)
     background = torch.zeros(3, device=device)
-    neighbor_cache = {}
-    if (
-        config.lambda_image > 0
-        or config.lambda_ssim > 0
-        or config.lambda_well_exposure > 0
-        or config.lambda_well_saturated > 0
-    ):
+    if config.lambda_image > 0 or config.lambda_ssim > 0:
         if device.type != "cuda":
             raise ValueError("StereoGS rendered hybrid loss requires a CUDA device.")
         print("Rendering is enabled; scenes will be loaded one at a time.")
@@ -446,94 +347,48 @@ def main():
         if sampler is not None:
             sampler.set_epoch(epoch)
 
-        batch_iterator = tqdm(
-            dataloader,
-            total=len(dataloader),
-            desc=f"Epoch {epoch + 1}/{config.epochs}",
-            unit="batch",
-            disable=distributed and rank != 0,
-        )
-        for batch in batch_iterator:
+        for batch in dataloader:
             conditions = encode_prompt_batch(batch, encoder, device=str(device))
 
             for sample, condition in zip(batch, conditions):
                 optimizer.zero_grad()
                 source_features = sample["source_features"].to(device)
-                predicted, exposure_gain, saturation_gain = net(
-                    source_features,
-                    condition,
-                    return_gains=True,
-                )
+                predicted = net(source_features, condition)
                 source_model, cameras, target_images = load_render_sample(
                     sample, config.sh_degree, device
                 )
                 source_model._features_dc = predicted[:, :1, :]
                 source_model._features_rest = predicted[:, 1:, :]
-                image_l1, image_ssim, well_exposure, well_saturated = render_image_loss(
-                    source_model,
-                    cameras,
-                    target_images,
-                    pipeline,
-                    background,
-                    backward=True,
-                    retain_graph_for_regularization=(
-                        config.lambda_spatial_smooth > 0
-                        or config.lambda_magnitude > 0
-                    ),
-                    lambda_image=config.lambda_image,
-                    lambda_ssim=config.lambda_ssim,
-                    lambda_well_exposure=config.lambda_well_exposure,
-                    lambda_well_saturated=config.lambda_well_saturated,
+                image_l1, image_ssim = render_image_loss(
+                    source_model, cameras, target_images, pipeline, background
                 )
-                regularization_loss = torch.zeros((), device=device)
-
-                if config.lambda_gain > 0:
-                    # Exposure & Saturation Gain Loss
-                    gain_loss = config.lambda_gain * (
-                        F.mse_loss(exposure_gain, torch.ones_like(exposure_gain))
-                        + F.mse_loss(saturation_gain, torch.ones_like(saturation_gain))
-                    )
-                    regularization_loss = regularization_loss + gain_loss
+                total_loss = config.lambda_image * image_l1
+                if config.lambda_ssim > 0:
+                    total_loss = total_loss + config.lambda_ssim * image_ssim
                 
                 # Add spatial smoothness regularization
                 if config.lambda_spatial_smooth > 0:
                     xyz_positions = source_model.get_xyz
                     smooth_loss = spatial_smoothness_loss(
-                        predicted,
-                        xyz_positions,
+                        predicted, xyz_positions, 
                         k_neighbors=config.spatial_smooth_k,
-                        lambda_smooth=config.lambda_spatial_smooth,
-                        cache=neighbor_cache,
+                        lambda_smooth=config.lambda_spatial_smooth
                     )
-                    regularization_loss = regularization_loss + smooth_loss
+                    total_loss = total_loss + smooth_loss
                 
                 # Add magnitude regularization to prevent color bias
                 if config.lambda_magnitude > 0:
                     mag_loss = sh_magnitude_loss(predicted, lambda_magnitude=config.lambda_magnitude)
-                    regularization_loss = regularization_loss + mag_loss
+                    total_loss = total_loss + mag_loss
                 
-                if regularization_loss.requires_grad:
-                    regularization_loss.backward()
+                total_loss.backward()
                 optimizer.step()
-                
-                ## Loss Function ##
-                epoch_loss += (
-                    config.lambda_image * image_l1.item()
-                    + config.lambda_ssim * image_ssim.item()
-                    + config.lambda_well_exposure * well_exposure.item()
-                    + config.lambda_well_saturated * well_saturated.item()
-                )
+                epoch_loss += total_loss.item()
 
-                del regularization_loss, image_l1, image_ssim, well_exposure, well_saturated
-                del exposure_gain, saturation_gain
+                del total_loss, image_l1, image_ssim
                 del predicted, source_features, source_model, cameras, target_images
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
-
-            if not (distributed and rank != 0):
-                batch_iterator.set_postfix(
-                    loss=f"{epoch_loss / max(1, (batch_iterator.n + 1) * len(batch)):.6f}"
-                )
 
         mean_loss = epoch_loss / len(dataloader.dataset)
         print(f"epoch={epoch + 1}/{config.epochs} loss={mean_loss:.6f}")
