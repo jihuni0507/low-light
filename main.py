@@ -12,6 +12,9 @@ from scipy.spatial import cKDTree
 from models.clip_encoder import CLIPEncoder
 from models.gaussians_model import GaussianModel
 from models.injection_network import ConditionedGaussianSHNet
+from models.injection_network_residualSH import (
+    ConditionedGaussianSHNet as LegacyConditionedGaussianSHNet,
+)
 from train.train_base_gaussians import TrainConfig as BaseTrainConfig
 from train.train_base_gaussians import build_dataloader, build_model, load_colmap_data, train_loop
 
@@ -272,7 +275,18 @@ def run_injection(config, root_dir, condition_vec, train=True):
             )
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
-    net = ConditionedGaussianSHNet(
+    state_dict = checkpoint.get("model_state_dict", checkpoint) if checkpoint else None
+    is_legacy_checkpoint = bool(
+        state_dict
+        and "output_layer.weight" in state_dict
+        and "exposure_head.weight" not in state_dict
+    )
+    network_class = (
+        LegacyConditionedGaussianSHNet
+        if is_legacy_checkpoint
+        else ConditionedGaussianSHNet
+    )
+    net = network_class(
         condition_dim=checkpoint.get("condition_dim", condition_vec.shape[-1]) if checkpoint else condition_vec.shape[-1],
         sh_channels=3,
         hidden_dim=checkpoint.get("hidden_dim", int(injection_cfg.get("hidden_dim", 256))) if checkpoint else int(injection_cfg.get("hidden_dim", 256)),
@@ -316,9 +330,10 @@ def run_injection(config, root_dir, condition_vec, train=True):
         )
         print(f"Injection network checkpoint saved to: {checkpoint_path}")
     else:
-        state_dict = checkpoint.get("model_state_dict", checkpoint)
         net.load_state_dict(state_dict)
         net.eval()
+        if is_legacy_checkpoint:
+            print("Loaded legacy residual-SH injection checkpoint.")
         print(f"Loaded injection network checkpoint: {checkpoint_path}")
 
     with torch.no_grad():

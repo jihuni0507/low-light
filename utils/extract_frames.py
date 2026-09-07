@@ -8,7 +8,14 @@ import cv2
 import argparse
 from tqdm import tqdm
 
-def extract_frames(video_path, output_dir, num_views=5, center_frame=None, frame_offset=5):
+def extract_frames(
+    video_path,
+    output_dir,
+    num_views=5,
+    center_frame=None,
+    frame_offset=5,
+    scale=1.0,
+):
     '''
     Output directory structure
     output_dir/
@@ -29,6 +36,8 @@ def extract_frames(video_path, output_dir, num_views=5, center_frame=None, frame
         raise ValueError("num_views must be at least 1")
     if frame_offset < 0:
         raise ValueError("frame_offset must be non-negative")
+    if scale <= 0:
+        raise ValueError("scale must be greater than 0")
 
     os.makedirs(f'{output_dir}/images', exist_ok=True)
     capture = cv2.VideoCapture(video_path)
@@ -68,6 +77,17 @@ def extract_frames(video_path, output_dir, num_views=5, center_frame=None, frame
         if not success:
             continue
         output_path = os.path.join(output_dir, 'images', f"view{view_index}.jpg")
+
+        if scale != 1.0:
+            height, width = frame.shape[:2]
+            resized_width = max(1, round(width * scale))
+            resized_height = max(1, round(height * scale))
+            interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+            frame = cv2.resize(
+                frame,
+                (resized_width, resized_height),
+                interpolation=interpolation,
+            )
         
         if not cv2.imwrite(output_path, frame):
             capture.release()
@@ -81,9 +101,11 @@ def extract_frames(video_path, output_dir, num_views=5, center_frame=None, frame
         )
 
 def main():
+    home_dir = '/home/student_2'    
+    
     parser = argparse.ArgumentParser(description="Extract frames from video dataset.")
-    parser.add_argument("--video_path", type=str, default='/home/work/test2/video', help="Path to the directory with input video files.")
-    parser.add_argument("--output_dir", type=str, default='/home/work/test2/datasets', help="Directory to save extracted frames.")
+    parser.add_argument("--video_path", type=str, default=f'{home_dir}/video', help="Path to the directory with input video files.")
+    parser.add_argument("--output_dir", type=str, default=f'{home_dir}/datasets', help="Directory to save extracted frames.")
     parser.add_argument("--num_views", type=int, default=5, help="Number of views to extract (default: 5).")
     parser.add_argument(
         "--center_frame",
@@ -96,6 +118,12 @@ def main():
         type=int,
         default=5,
         help="Distance from the center frame to the outer views (default: 5).",
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=1.0,
+        help="Scale factor for output image width and height (default: 1.0).",
     )
     
     args = parser.parse_args()
@@ -117,6 +145,7 @@ def main():
             args.num_views,
             args.center_frame,
             args.frame_offset,
+            args.scale,
         )
         
     

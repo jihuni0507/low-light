@@ -74,6 +74,10 @@ class GaussianInjectionDataset(Dataset):
         path = Path(value)
         if not path.is_absolute():
             path = self.root / path
+        if not path.exists() and str(path).startswith("/home/student_2/"):
+            container_path = Path("/workspace") / path.relative_to("/home/student_2")
+            if container_path.exists():
+                path = container_path
         return path.resolve()
 
     def _validate_sample_schema(self, validation: Dict[str, Any]) -> None:
