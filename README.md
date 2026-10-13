@@ -52,6 +52,13 @@ bright source Gaussian PLY + 5 inverse-ISP pseudo-GT views + prompt
   함께 가진다. 서로 다른 장면을 추가할 때는 샘플마다 `source_gaussian_ply`를
   별도로 기록한다.
 
+#### 🔸 어두운 이미지 생성
+```bash
+python models/inverse_isp.py ./datasets/example/ ./datasets/example_darken --seed 42 --strength 0.5
+```
+`--strength`는 0~1 범위이며, 0은 원본을 유지하고 1은 거의 검은색에 가까운
+강한 어두움 효과를 적용한다. 생략하면 기본값 1이 적용된다.
+
 권장 디렉터리 구조:
 
 ```text
@@ -59,11 +66,11 @@ low-light/
 ├── dataset.yaml
 └── datasets/
     └── inputs/
-      ├── office1_dark_view1.png
-      ├── office1_dark_view2.png
-      ├── office1_dark_view3.png
-      ├── office1_dark_view4.png
-      └── office1_dark_view5.png
+      ├── 1.png
+      ├── 2.png
+      ├── 3.png
+      ├── 4.png
+      └── 5.png
 ```
 
 `dataset.yaml` 예시:
@@ -141,7 +148,7 @@ python main.py --config config.yaml
 ``` Bash
 export PYTHONPATH=$PWD
 python main.py --config config.yaml --stage clip
-```
+```~~
 
 **3) StereoGS base reconstruction**
 ``` Bash
@@ -343,6 +350,7 @@ InverseISP().from_path(
     "source.png",
     "target_low_light.png",
     seed=42,
+    strength=0.5,
 )
 ```
 ---
