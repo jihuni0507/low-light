@@ -20,7 +20,15 @@ import models.gaussians_model
 
 from torchvision import transforms
 
-
+'''
+Inputs:
+    i1, i2 : two low-light images
+    G : PLY file of baseline gaussian primitives (geometry frozen)
+    
+Outputs:
+    G' : PLY file Enhanced Gaussian primiitve
+    ??? : curve parameters
+'''
 
 
 def weights_init(m):
@@ -39,18 +47,37 @@ def train(config):
     if config.load_pretain == True:
         GE_net.load_state_dict(torch.load(config.pretrain_dir))
     # train_dataset = dataloader.gaussian_loader(config.lowlight_images_path)
-    # tran_loadr = ...
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=config.train_batch_size, shuffle=True, num_workers=config.num_workers, pin_memory=True)
     
+    # Gaussian-wise loss term
+    L_reg = loss.L_reg()
+    # Rendered Loss
     L_color = loss.L_color()
-    L_second = loss.L_second()
-    # and more losses...
+    L_exp = loss.L_exp()
     
     optimizer = torch.optim.Adam(GE_net.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     
     GE_net.train()
     
     for epoch in range(config.num_epochs):
-        pass
+        for iteration, lowlight_img1, lowlight_img2 in enumerate(train_loader):
+            lowlight_img1 = lowlight_img1.cuda()
+            lowlight_img2 = lowlight_img2.cuda()
+            base_gaussians = None           
+            
+            enhanced_gaussians_1, enhanced_gaussians, r = GE_net(base_gaussians)
+            rendered_img = None # Rendered based on given third camera position
+            
+            # loss_reg = torch.(L_reg(enhanced_gaussians))
+            loss_col = 5 * torch.mean(L_color(rendered_img))
+            loss_exp = 10 * torch.mean(L_color(rendered_img))
+            
+            # Final Loss
+            loss = loss_col + loss_exp
+            
+            optimizer.zero_grad()
+            loss.backward()
+            
 
 if __name__ == "__main__":
 

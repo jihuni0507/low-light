@@ -41,11 +41,13 @@ class gaussian_enhance_net(nn.Module):
         x = x + r1 * (torch.pow(x, 2) - x)
         x = x + r2 * (torch.pow(x, 2) - x)
         x = x + r3 * (torch.pow(x, 2) - x)
-        enhanced_gaussians_1 = x + r4 * (torch.pow(x, 2) - x)
+        enhanced_gaussians_1 = x + r4 * (torch.pow(x, 2) - x) # Enhancement Lv.4
         x = enhanced_gaussians_1 + r5 * (torch.pow(enhanced_gaussians_1, 2) - enhanced_gaussians_1)
         x = x + r6 * (torch.pow(x, 2) - x)
         x = x + r7 * (torch.pow(x, 2) - x)
-        enhanced_gaussians = x + r8 * (torch.pow(x, 2) - x)
+        enhanced_gaussians = x + r8 * (torch.pow(x, 2) - x) # Enhancement Lv.8
+        
+        # Predicted enhancement for each Gausians
         r = torch.cat([r1, r2, r3, r4, r5, r6, r7, r8], 1)
         
         return enhanced_gaussians_1, enhanced_gaussians, r
