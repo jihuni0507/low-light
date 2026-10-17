@@ -191,36 +191,46 @@ python main.py --config config.yaml --stage injection --train False
 Inference는 체크포인트를 불러와 SH feature를 갱신하고
 `output/injection/injected_gaussians.ply`에 저장한다.
 
-**5) 최종 PLY 렌더링**
+**5) Gaussian 렌더링**
 
-`output/injection/injected_gaussians.ply`를 기존 `cameras.json`으로 렌더링한다.
+`render/renderer_splats.py`는 PLY에서 위치, log-scale, quaternion, opacity
+logit, SH 계수를 읽고, 카메라 JSON의 camera-to-world pose와 intrinsics를 사용해
+이미지를 생성한다. StereoGS의 Python Camera/모델 객체는 사용하지 않는다.
+카메라 JSON은 카메라 목록(list) 또는 `{"cameras": [...]}` 형식이며, 각 항목은
+`id`, `width`, `height`, `fx`, `fy`, `rotation`(3×3 camera-to-world 회전),
+`position`(camera-to-world 위치)을 포함해야 한다. `cx`, `cy`는 선택 항목이고,
+생략하면 이미지 중심을 사용한다.
 
 ``` Bash
-python renderes/renderer_splats.py \
+python render/renderer_splats.py \
   --ply output/injection/injected_gaussians.ply \
-  --camera_json ../StereoGS/output/LLFF/office1_5views/cameras.json \
+  --camera_json path/to/cameras.json \
   --mode cameras \
   --output_dir output/rendered/cameras \
   --video output/rendered/cameras.mp4 \
-  --sh_degree 3
+  --device cuda
 ```
 
-원형 orbit 경로로 비디오를 생성하려면:
+`render_gaussians()` 함수는 PLY 대신 가우시안 텐서 mapping도 받을 수 있다.
+`xyz`, `scaling`, `rotation`, `opacity`와 SH `features`(또는
+`features_dc`/`features_rest`)를 넘기며, 기본적으로 scale은 log-scale,
+opacity는 logit으로 해석한다. 이미 RGB 색상을 가진 경우에는 SH 대신
+`colors` 텐서를 넘길 수 있다. 렌더러는 CUDA rasterizer를 사용하므로
+`diff_gaussian_rasterization`이 설치된 환경에서 실행한다.
+
+원형 orbit 경로로 여러 프레임을 생성하려면:
 
 ``` Bash
-python renderes/renderer_splats.py \
+python render/renderer_splats.py \
   --ply output/injection/injected_gaussians.ply \
-  --camera_json ../StereoGS/output/LLFF/office1_5views/cameras.json \
+  --camera_json path/to/cameras.json \
   --mode orbit \
   --frames 120 \
   --fps 30 \
   --output_dir output/rendered/orbit \
   --video output/rendered/orbit.mp4 \
-  --sh_degree 3
+  --device cuda
 ```
-
-렌더링은 CUDA rasterizer와 OpenCV가 설치된 reconstruction/injection 환경에서
-실행한다.
 
 **6) Pseudo-GT image loss**
 
