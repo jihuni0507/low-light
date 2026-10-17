@@ -7,14 +7,13 @@ import numpy as np
 
 from plyfile import PlyData
 import torch.nn.functional as F
+import models.enhance_gaussian
+import datasets.dataset
+from initialize_gaussians import initialize_gaussians
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir) #low-light
 sys.path.append(parent_dir)
-
-import models.enhance_gaussian
-import datasets.dataset
-from initialize_gaussians import initialize_gaussians
 
 C0 = 0.28209479177387814
 
