@@ -9,6 +9,10 @@ from torchvision.models.vgg import vgg16
 import numpy as np
 
 # Gaussian-Domain Loss (Regularization)
+'''
+gaussians_chunk_size=1024 와 같이 가우시안을 나눠서 학습할 때 
+사용할 수 있는 손실로 설계해야함
+'''
 
 class L_reg(nn.Module):
     def __init__(self):
