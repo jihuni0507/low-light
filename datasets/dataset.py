@@ -132,7 +132,7 @@ def _parse_colmap_images(
     return images
 
 
-def _load_colmap_cameras(model_path: Path) -> dict[int, dict[str, Any]]:
+def load_colmap_cameras(model_path: Path) -> dict[int, dict[str, Any]]:
     cameras_path = model_path / "cameras.txt"
     images_path = model_path / "images.txt"
     missing = [path for path in (cameras_path, images_path) if not path.is_file()]
@@ -192,7 +192,7 @@ class GaussianSceneDataset(Dataset):
                         raise FileNotFoundError(
                             f"Scene {sample['id']!r}: COLMAP model directory not found: {path}"
                         )
-                    _load_colmap_cameras(path)
+                    load_colmap_cameras(path)
                 elif not path.is_file():
                     raise FileNotFoundError(f"Scene {sample['id']!r}: {path}")
 
@@ -238,7 +238,7 @@ class GaussianSceneDataset(Dataset):
         else:
             colmap_model = self._resolve_path(sample["colmap_model"])
             if colmap_model not in self._camera_cache:
-                self._camera_cache[colmap_model] = _load_colmap_cameras(colmap_model)
+                self._camera_cache[colmap_model] = load_colmap_cameras(colmap_model)
             camera_by_id = self._camera_cache[colmap_model]
 
         input_views = []

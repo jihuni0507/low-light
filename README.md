@@ -15,6 +15,9 @@
 ## 📋 TODO
 - RE10K, LOL 같은 외부 데이터 다운받아서 바로 Dataloader에 로딩될 수 있도록 `dataset.yaml` 구축 로직 구현
 - 현재 `Dataset` 구조에서 이미지만 바로 어둡게 하는 로직 구현
+- 추후 loss 항목 별로 확인할 수 있도록 로그 추가
+- PLY 생성시 reference 뷰 두개 인덱스가 파일명에 들어가도록 수정
+- `near`, `far` 관련 현재 두개: 고정시켜두면 loss가 높고 유동적으로 하면 형태가 무너짐(실제로 더 밝아지긴 함) <- 코드 수정해야함
 
 
 ## Instructions
@@ -95,7 +98,7 @@ dataset:
   root: ./data
   samples:
     - id: cabin_undistorted_0
-      source_gaussian_ply: ./cabin_undistorted/base_gaussians.ply
+      source_gaussian_ply: ./cabin_undistorted/base_gaussians_2_8.ply
       colmap_model: ./cabin_undistorted/sparse
       input_views:
         - image: ./cabin_undistorted/images/image002.jpg
@@ -106,7 +109,7 @@ dataset:
         camera_id: 5
 
     - id: chair_undistorted_0
-      source_gaussian_ply: ./chair_undistorted/base_gaussians.ply
+      source_gaussian_ply: ./chair_undistorted/base_gaussians_3_9.ply
       colmap_model: ./chair_undistorted/sparse
       input_views:
         - image: ./chair_undistorted/images/image003.jpg
@@ -116,6 +119,8 @@ dataset:
       render_view:
         camera_id: 5
 ```
+`source_gaussian_ply` 경로를 지정할 때, 매칭된 두 개의 이미지 번호를 명시하도록 한다.
+
 
 데이터를 등록할 때 다음 조건을 확인한다.
 
@@ -218,8 +223,25 @@ L = lambda_image * L1(render(SH_pred), pseudo_GT_image)
 
 ### 🔶 Baseline Gaussian Reconstruction using MVSplat
 
-MVSplat 에서 baseline gaussian 재구성 할때:
-``` bash
+Baseline gaussian 구성 전 scene의 `near`, `far` 자동으로 구한 뒤 gaussian 재구성
+
+``` powershell
+for scene_name in "cabin" "chair" "fan" "musharna" "office" "table"; do
+  echo "Processing scene: $scene_name"
+
+python -m src.scripts.infer_colmap_auto_bounds \
+  --colmap-model ./datasets/colmap_based/${scene_name}_undistorted/sparse \
+  --images ./datasets/colmap_based/${scene_name}_undistorted/images \
+  --checkpoint checkpoints/re10k.ckpt \
+  --context-indices 2 8 \
+  --target-index 5 \
+  --output ../low-light/data/${scene_name}_undistorted/base_render.png \
+  --ply-output ../low-light/data/${scene_name}_undistorted/base_gaussians.ply
+done
+```
+
+`near`, `far` 지정 후 MVSplat 에서 baseline gaussian 재구성 할때:
+``` powershell
 for scene_name in "cabin" "chair" "fan" "musharna" "office" "table"; do
   echo "Processing scene: $scene_name"
   
@@ -266,14 +288,28 @@ python train/train_enhance_network.py \
 
 ```bash
 python infer_enhance.py \
-  --baseline_gaussian data/scene_001/base_gaussians.ply \
+  --baseline_gaussian data/cabin_undistorted/base_gaussians.ply \
   --checkpoint snapshots/latest.pth \
-  --camera_json data/scene_001/cameras.json \
-  --camera_ids 2 \
-  --output_dir output/scene_001_inference
+  --colmap_model data/cabin_undistorted/sparse \
+  --camera_ids 7 \
+  --images_dir data/cabin_undistorted/images \
+  --output_dir output/cabin_7
 ```
 
-`--camera_ids`를 생략하면 카메라 JSON의 모든 뷰를 렌더링한다. 추론 결과는
+MVSplat에서 Gaussian PLY를 내보낼 때 위치를 중심 이동·정규화·회전하므로,
+원본 COLMAP pose를 그대로 넣으면 PLY와 좌표계가 달라 검은 이미지가 나올 수 있다.
+수정된 `mvsplat/src/scripts/infer_colmap.py`는 PLY와 함께 변환된 카메라 pose를
+`base_gaussians.cameras.json`에 저장한다. 따라서 기존 baseline PLY는 MVSplat
+추론 명령을 다시 실행해 sidecar를 만든 뒤 이 명령을 사용한다. `--colmap_model`은
+COLMAP 모델 디렉터리(`cameras.txt`, `images.txt` 포함)를 지정하며, 렌더링에는
+PLY 옆 sidecar를 사용한다. 원본 카메라 이미지 디렉터리는 기본적으로 COLMAP
+모델 폴더의 부모에 있는 `images`를 사용하며, 다른 경로라면 `--images_dir`로
+지정한다. 카메라 이미지의 실제 크기를 확인해 해당 해상도로 렌더링하고, 크기가
+카메라 메타데이터와 다르면 intrinsics도 함께 비례 조정한다. JSON 카메라를 직접
+제공하려면 `--camera_json`을 쓰고, 원본 이미지 크기 참조를 위해 `--images_dir`도
+지정할 수 있다. JSON의 pose가 PLY 좌표계 기준인지 확인해야 한다.
+
+`--camera_ids`를 생략하면 지정한 카메라 입력의 모든 뷰를 렌더링한다. 추론 결과는
 `output_dir/enhanced_gaussians.ply`와 `output_dir/render_<camera_id>.png`에
 저장된다. 기본 checkpoint는 `snapshots/latest.pth`이며, `--output_ply`,
 `--chunk_size`, `--device`로 저장 위치·추론 chunk 크기·CUDA 장치를 지정할 수 있다.

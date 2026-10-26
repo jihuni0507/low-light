@@ -75,10 +75,63 @@ def save_enhanced_ply(source_path, output_path, enhanced_gaussians):
     ply_data.write(str(output_path))
 
 
-def render_views(gaussians, cameras, output_dir, device):
+def match_camera_image_size(camera, images_dir):
+    image_name = camera.get("image_name")
+    if not image_name:
+        raise ValueError(
+            "Camera metadata must include image_name to match the source image size"
+        )
+
+    image_path = images_dir / image_name
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Source camera image not found: {image_path}")
+
+    with Image.open(image_path) as source_image:
+        source_width, source_height = source_image.size
+
+    camera_width = int(camera["width"])
+    camera_height = int(camera["height"])
+    if camera_width <= 0 or camera_height <= 0:
+        raise ValueError(
+            f"Camera dimensions must be positive, got "
+            f"{camera_width}x{camera_height}"
+        )
+    if source_width <= 0 or source_height <= 0:
+        raise ValueError(
+            f"Source image dimensions must be positive, got "
+            f"{source_width}x{source_height}: {image_path}"
+        )
+
+    if (source_width, source_height) == (camera_width, camera_height):
+        return camera
+
+    adjusted_camera = dict(camera)
+    scale_x = source_width / camera_width
+    scale_y = source_height / camera_height
+    adjusted_camera["width"] = source_width
+    adjusted_camera["height"] = source_height
+    for key in ("fx", "cx"):
+        if key in adjusted_camera:
+            adjusted_camera[key] *= scale_x
+    for key in ("fy", "cy"):
+        if key in adjusted_camera:
+            adjusted_camera[key] *= scale_y
+    if "intrinsics" in adjusted_camera:
+        intrinsics = [list(row) for row in adjusted_camera["intrinsics"]]
+        intrinsics[0][0] *= scale_x
+        intrinsics[0][2] *= scale_x
+        intrinsics[1][1] *= scale_y
+        intrinsics[1][2] *= scale_y
+        adjusted_camera["intrinsics"] = intrinsics
+    return adjusted_camera
+
+
+def render_views(gaussians, cameras, output_dir, device, images_dir=None):
     output_dir.mkdir(parents=True, exist_ok=True)
     rendered_paths = []
     for camera in cameras:
+        if images_dir is not None:
+            camera = match_camera_image_size(camera, images_dir)
         camera_id = int(camera.get("id", len(rendered_paths)))
         image = render_gaussians(gaussians, camera, device=device)
         image_array = (
@@ -97,7 +150,10 @@ def render_views(gaussians, cameras, output_dir, device):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Enhance a baseline Gaussian PLY and render it with camera JSON."
+        description=(
+            "Enhance a baseline Gaussian PLY and render it with camera JSON "
+            "or a COLMAP text model."
+        )
     )
     parser.add_argument(
         "--baseline_gaussian",
@@ -109,10 +165,21 @@ def build_parser():
         default="snapshots/latest.pth",
         help="Trained enhance_network checkpoint",
     )
-    parser.add_argument(
+    camera_input = parser.add_mutually_exclusive_group(required=True)
+    camera_input.add_argument(
         "--camera_json",
-        required=True,
         help="Camera entries as a JSON list or an object containing 'cameras'",
+    )
+    camera_input.add_argument(
+        "--colmap_model",
+        help="COLMAP text model directory containing cameras.txt and images.txt",
+    )
+    parser.add_argument(
+        "--images_dir",
+        help=(
+            "Directory containing the original camera images; defaults to the "
+            "images directory next to --colmap_model"
+        ),
     )
     parser.add_argument(
         "--camera_ids",
@@ -136,7 +203,7 @@ def main():
 
     baseline_path = Path(args.baseline_gaussian).resolve()
     checkpoint_path = Path(args.checkpoint).resolve()
-    camera_json_path = Path(args.camera_json).resolve()
+    camera_path = Path(args.camera_json or args.colmap_model).resolve()
     output_dir = Path(args.output_dir).resolve()
     output_ply_path = (
         Path(args.output_ply).resolve()
@@ -147,23 +214,45 @@ def main():
     for input_path, label in (
         (baseline_path, "Baseline Gaussian PLY"),
         (checkpoint_path, "Enhancement checkpoint"),
-        (camera_json_path, "Camera JSON"),
     ):
         if not input_path.is_file():
             raise FileNotFoundError(f"{label} not found: {input_path}")
+    if args.camera_json and not camera_path.is_file():
+        raise FileNotFoundError(f"Camera JSON not found: {camera_path}")
+    if args.colmap_model and not camera_path.is_dir():
+        raise NotADirectoryError(f"COLMAP model directory not found: {camera_path}")
+    images_dir = (
+        Path(args.images_dir).resolve()
+        if args.images_dir
+        else camera_path.parent / "images" if args.colmap_model
+        else None
+    )
+    if images_dir is not None and not images_dir.is_dir():
+        raise NotADirectoryError(f"Source images directory not found: {images_dir}")
     if baseline_path == output_ply_path:
         raise ValueError("The enhanced PLY output path must differ from the input PLY")
     if args.chunk_size <= 0:
         parser.error("--chunk_size must be positive")
 
-    device = torch.device(args.device)
-    if device.type != "cuda" or not torch.cuda.is_available():
-        raise RuntimeError(
-            "Gaussian rendering requires CUDA and diff_gaussian_rasterization; "
-            "select an available CUDA device with --device."
-        )
-
-    cameras = load_camera_entries(camera_json_path)
+    cameras = (
+        load_camera_entries(camera_path)
+        if args.camera_json
+        else None
+    )
+    if args.colmap_model:
+        camera_sidecar = baseline_path.with_suffix(".cameras.json")
+        if not camera_sidecar.is_file():
+            raise FileNotFoundError(
+                "Camera poses in a COLMAP model are in the original scene "
+                "coordinate frame, while the MVSplat-exported Gaussian PLY uses "
+                "a centered, scaled, and rotated frame. Re-export the baseline "
+                f"PLY to create its camera sidecar ({camera_sidecar}), or pass "
+                "a camera JSON already transformed into the PLY coordinate frame "
+                "with --camera_json."
+            )
+        cameras = load_camera_entries(camera_sidecar)
+    if cameras is None:
+        raise RuntimeError("No camera entries were loaded")
     if args.camera_ids is not None:
         cameras_by_id = {
             int(camera.get("id", index)): camera
@@ -172,11 +261,18 @@ def main():
         missing_ids = sorted(set(args.camera_ids) - cameras_by_id.keys())
         if missing_ids:
             raise ValueError(
-                f"Camera ids not found in {camera_json_path}: {missing_ids}"
+                f"Camera ids not found in {camera_path}: {missing_ids}"
             )
         cameras = [cameras_by_id[camera_id] for camera_id in args.camera_ids]
         if not cameras:
             parser.error("--camera_ids must contain at least one camera id")
+
+    device = torch.device(args.device)
+    if device.type != "cuda" or not torch.cuda.is_available():
+        raise RuntimeError(
+            "Gaussian rendering requires CUDA and diff_gaussian_rasterization; "
+            "select an available CUDA device with --device."
+        )
 
     gaussians = load_gaussians_from_ply(baseline_path, device)
     network = load_enhance_network(checkpoint_path, device)
@@ -186,7 +282,7 @@ def main():
         )
         save_enhanced_ply(baseline_path, output_ply_path, enhanced_gaussians)
         rendered_paths = render_views(
-            enhanced_gaussians, cameras, output_dir, device
+            enhanced_gaussians, cameras, output_dir, device, images_dir
         )
 
     print(f"Enhanced Gaussian PLY: {output_ply_path}")

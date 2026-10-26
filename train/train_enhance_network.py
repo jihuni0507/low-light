@@ -208,10 +208,8 @@ def train(config):
         
         if lowest_loss is None or average_loss < lowest_loss:
             lowest_loss = average_loss
-            torch.save(
-                checkpoint,
-                snapshots_folder / f"best_{epoch + 1:04d}.pth",
-            )
+            best_epoch = epoch + 1
+            best_checkpoint = checkpoint.copy()
         torch.save(checkpoint, snapshots_folder / "latest.pth")
         if (
             (epoch + 1) % config.snapshot_iter == 0
@@ -227,6 +225,11 @@ def train(config):
                 f"- rasterizer calls: {epoch_render_calls} "
                 f"- scenes: {scene_render_summary}"
             )
+    
+    torch.save(
+        best_checkpoint,
+        snapshots_folder / f"best_epoch_{best_epoch:04d}.pth",
+    )
 
 if __name__ == "__main__":
 
