@@ -9,17 +9,23 @@
 5. Loss - computed between rendered SH output and inverse-ISP pseudo-GT images
 
 ```
-## Overall Pipeline
-<img width="995" height="963" alt="image" src="https://github.com/user-attachments/assets/f24ab313-1b85-4c14-bfd5-0f7054fb2636" />
+<!-- ## Overall Pipeline
+<img width="995" height="963" alt="image" src="https://github.com/user-attachments/assets/f24ab313-1b85-4c14-bfd5-0f7054fb2636" /> -->
+
+## 📋 TODO
+- RE10K, LOL 같은 외부 데이터 다운받아서 바로 Dataloader에 로딩될 수 있도록 `dataset.yaml` 구축 로직 구현
+- 현재 `Dataset` 구조에서 이미지만 바로 어둡게 하는 로직 구현
 
 
-## 사용방식
+## Instructions
+
 ### 🔶 Environment Setting
 
 ``` Bash
 Set-Location -Path "your/project/directory"
 $env:PYTHONPATH = "your/project/directory"
 ```
+
 ### 🔶 `main.py`
 `config.yaml` 파일을 통해 실험 세부 설정을 할 수 있다.
 
@@ -27,89 +33,112 @@ $env:PYTHONPATH = "your/project/directory"
 - 실험 시나리오 별 `yaml`파일 생성하거나
 - Base `yaml` + 세부 `yaml` 모듈화 시도 중
 
-### 🔶 Dataset 구성 가이드
+### 🔶 Dataset 구성
 
-Injection network 학습용 데이터셋은 밝은 source Gaussian과 inverse ISP로
-생성한 5개의 어두운 pseudo-GT view를 하나의 scene으로 묶는다.
-
-```text
-bright source Gaussian PLY + 5 inverse-ISP pseudo-GT views + prompt
-                         |
-                         v
-       dark predicted Gaussian
+``` txt
+low-light/
+├── dataset.yaml
+├── train/
+│   ├── train_enhance_network.py
+│   └── initialize_gaussians.py
+├── datasets/
+│   └── dataset.py
+├── render/
+│   └── renderer_splats.py
+└── data/
+    ├── scene_001/
+    │   ├── point_cloud.ply
+    │   ├── sparse/
+    │   │   └── 0/
+    │   │       ├── cameras.txt
+    │   │       └── images.txt
+    │   └── images/
+    │       ├── lowlight_01.png
+    │       ├── lowlight_02.png
+    │       └── ...
+    └── scene_002/
+        ├── point_cloud.ply
+        ├── sparse/
+        │   └── 0/
+        │       ├── cameras.txt
+        │       └── images.txt
+        └── images/
+            ├── lowlight_01.png
+            ├── lowlight_02.png
+            └── ...
 ```
 
-각 샘플은 다음 정보를 가진다.
 
-| 항목 | 설명 |
-| --- | --- |
-| `views` | inverse ISP로 생성한 어두운 pseudo-GT 이미지 5장의 경로 |
-| `camera_json` | StereoGS가 저장한 `cameras.json` 경로 |
-| `camera_ids` | 렌더링할 camera id 목록. 생략하면 첫 5개 사용 |
-| `prompt` | 적용할 appearance 변환 방향 텍스트 |
+#### **🔶 Synthesizing Dark Images - Inverse ISP**
+`models/inverse_isp.py`에 구현되어 있으며, 사용 예시는 다음과 같다
+``` python
+from models.inverse_isp import InverseISP
 
-    각 샘플은 자신의 밝은 입력 Gaussian PLY와 대응하는 pseudo-GT view 5장을
-  함께 가진다. 서로 다른 장면을 추가할 때는 샘플마다 `source_gaussian_ply`를
-  별도로 기록한다.
-
-#### 🔸 어두운 이미지 생성
+InverseISP().from_path(
+    "source.png",
+    "target_low_light.png",
+    seed=42,
+    strength=0.5,
+)
+```
+---
 ```bash
 python models/inverse_isp.py ./datasets/example/ ./datasets/example_darken --seed 42 --strength 0.5
 ```
 `--strength`는 0~1 범위이며, 0은 원본을 유지하고 1은 거의 검은색에 가까운
 강한 어두움 효과를 적용한다. 생략하면 기본값 1이 적용된다.
 
-권장 디렉터리 구조:
-
-```text
-low-light/
-├── dataset.yaml
-└── datasets/
-    └── inputs/
-      ├── 1.png
-      ├── 2.png
-      ├── 3.png
-      ├── 4.png
-      └── 5.png
-```
-
 `dataset.yaml` 예시:
 
 ```yaml
 dataset:
-  name: low_light_injection
-  root: "."
-  num_views: 5
+  root: ./data
   samples:
-    - id: office1_low_light
-      source_gaussian_ply: "../StereoGS/output/LLFF/office1_5views/point_cloud/iteration_30000/point_cloud.ply"
-      views:
-        - input_image: "datasets/inputs/office1_dark_view1.png"
-        - input_image: "datasets/inputs/office1_dark_view2.png"
-        - input_image: "datasets/inputs/office1_dark_view3.png"
-        - input_image: "datasets/inputs/office1_dark_view4.png"
-        - input_image: "datasets/inputs/office1_dark_view5.png"
-      camera_json: "../StereoGS/output/LLFF/office1_5views/cameras.json"
-      camera_ids: [0, 1, 2, 3, 4]
-      prompt: "low-light"
+    - id: cabin_undistorted_0
+      source_gaussian_ply: ./cabin_undistorted/base_gaussians.ply
+      colmap_model: ./cabin_undistorted/sparse
+      input_views:
+        - image: ./cabin_undistorted/images/image002.jpg
+          camera_id: 1  # images.txt의 IMAGE_ID
+        - image: ./cabin_undistorted/images/image008.jpg
+          camera_id: 8
+      render_view:
+        camera_id: 5
+
+    - id: chair_undistorted_0
+      source_gaussian_ply: ./chair_undistorted/base_gaussians.ply
+      colmap_model: ./chair_undistorted/sparse
+      input_views:
+        - image: ./chair_undistorted/images/image003.jpg
+          camera_id: 3
+        - image: ./chair_undistorted/images/image009.jpg
+          camera_id: 9
+      render_view:
+        camera_id: 5
 ```
 
 데이터를 등록할 때 다음 조건을 확인한다.
 
 - 모든 경로는 `dataset.root`를 기준으로 해석한다.
 - source PLY의 SH degree와 trainer의 `--sh_degree`가 동일해야 한다.
-- pseudo-GT 이미지는 source reconstruction camera와 동일한 view 순서여야 한다.
-- Rendered image loss에는 source reconstruction의 StereoGS `cameras.json`이 필요하다.
-- 각 sample에는 appearance 변환 방향을 나타내는 `prompt`가 있어야 한다.
-- 각 prompt는 CLIP 텍스트 인코더를 통과해 조건 벡터가 된다.
-- 각 scene은 반드시 정확히 5개의 view를 가져야 한다.
+- `camera_json` 또는 COLMAP TXT 모델 경로인 `colmap_model` 중 하나를 지정한다.
+- `input_views[].camera_id`와 `render_view.camera_id`는 이미지의 COLMAP `IMAGE_ID`를 사용한다.
+- 입력 이미지 경로는 undistort된 COLMAP 이미지의 실제 파일 경로를 지정하고, 이미지 크기는 COLMAP 카메라 크기와 같아야 한다.
+
+JSON 대신 `sparse/cameras.txt`와 `sparse/images.txt`를 직접 읽을 수 있다.
+undistort된 이미지의 `PINHOLE` 및 `SIMPLE_PINHOLE` 카메라 모델을 지원하며,
+COLMAP의 world-to-camera pose는 렌더러 입력인 camera-to-world pose로 변환한다.
+
+COLMAP의 카메라 `CAMERA_ID`가 아니라 각 등록 이미지의 `IMAGE_ID`를 YAML의
+`camera_id`에 지정한다. 동일한 CAMERA_ID를 여러 이미지가 공유할 수 있기
+때문이다.
 
 현재 `dataset.yaml`은 데이터 포맷을 정의하는 단계이며, dataset 전체를 읽는
 DataLoader는 `train/injection_dataset.py`에 구현되어 있다. `len(dataset)`은
 view 수가 아니라 scene 수이며, 실제 학습에서는 예측 SH로 source geometry를
 render한 결과와 각 샘플의 pseudo-GT image 사이의 loss를 계산한다.
 
-Dataset과 DataLoader 사용 예시:
+**🔹 Dataset과 DataLoader 사용 예시:**
 
 ```python
 from train.injection_dataset import build_injection_dataloader, encode_prompt_batch
@@ -138,50 +167,7 @@ loss를 계산한 뒤 평균을 내는 방식으로 학습한다. 모든 sample�
 같은 경우에도 이 방식은 사용할 수 있으며, 추후 padding 기반 batch 연산으로
 최적화할 수 있다.
 
-**1) 전체 파이프라인 실행**
-``` Bash
-export PYTHONPATH=$PWD
-python main.py --config config.yaml
-```
-
-**2) CLIP만 단독 실행**
-``` Bash
-export PYTHONPATH=$PWD
-python main.py --config config.yaml --stage clip
-```~~
-
-**3) StereoGS base reconstruction**
-``` Bash
-cd ../StereoGS
-python train.py \
-  -s /path/to/scene \
-  -m ./output/llff/fern_5views \
-  --dataset_name LLFF \
-  --n_views 5 \
-  --resolution 8 \
-  --eval \
-  --use_mvs_init \
-  --mvs_model_name MVSAnywhere \
-  --sh_degree 3
-```
-
-StereoGS saves the handoff file at
-`<model_path>/point_cloud/iteration_<N>/point_cloud.ply`. Set
-`injection.gaussian_ply` in `config.yaml` to that file before running the
-injection stage. The `--sh_degree 3` option is required because this project
-expects 45 non-DC SH values per Gaussian.
-
-**4) SH injection 학습**
-``` Bash
-export PYTHONPATH=$PWD
-python train/train_injection_network.py \
-  --dataset_yaml dataset.yaml \
-  --sh_degree 3 \
-  --device cuda \
-  --lambda_sh 0 \
-  --lambda_image 1.0 \
-  --lambda_ssim 0.2
-```
+### 🔶 Train
 
 학습 결과는 `output/injection/injection_network.pt`에 저장된다. 저장된 가중치를
 사용해 source PLY에 appearance를 적용하려면:
@@ -211,26 +197,13 @@ python render/renderer_splats.py \
   --device cuda
 ```
 
-`render_gaussians()` 함수는 PLY 대신 가우시안 텐서 mapping도 받을 수 있다.
-`xyz`, `scaling`, `rotation`, `opacity`와 SH `features`(또는
+- `render_gaussians()` 함수는 PLY 대신 가우시안 텐서 mapping도 받을 수 있다.
+- `xyz`, `scaling`, `rotation`, `opacity`와 SH `features`(또는
 `features_dc`/`features_rest`)를 넘기며, 기본적으로 scale은 log-scale,
-opacity는 logit으로 해석한다. 이미 RGB 색상을 가진 경우에는 SH 대신
-`colors` 텐서를 넘길 수 있다. 렌더러는 CUDA rasterizer를 사용하므로
-`diff_gaussian_rasterization`이 설치된 환경에서 실행한다.
+opacity는 logit으로 해석한다.
+- 이미 RGB 색상을 가진 경우에는 SH 대신 `colors` 텐서를 넘길 수 있다.
+- 렌더러는 CUDA rasterizer를 사용하므로 `diff_gaussian_rasterization`이 설치된 환경에서 실행한다.
 
-원형 orbit 경로로 여러 프레임을 생성하려면:
-
-``` Bash
-python render/renderer_splats.py \
-  --ply output/injection/injected_gaussians.ply \
-  --camera_json path/to/cameras.json \
-  --mode orbit \
-  --frames 120 \
-  --fps 30 \
-  --output_dir output/rendered/orbit \
-  --video output/rendered/orbit.mp4 \
-  --device cuda
-```
 
 **6) Pseudo-GT image loss**
 
@@ -241,126 +214,71 @@ L = lambda_image * L1(render(SH_pred), pseudo_GT_image)
   + lambda_ssim * (1 - SSIM(render(SH_pred), pseudo_GT_image))
 ```
 
-StereoGS의 `render.py`를 별도 프로세스로 실행하지 않고 동일한
-`gaussian_renderer.render()`를 직접 호출한다. 그래야 렌더링 loss의 gradient가
-injection network까지 전달된다.
-
-``` Bash
-python train/train_injection_network.py \
-  --dataset_yaml dataset.yaml \
-  --lambda_sh 0.0 \
-  --lambda_image 1.0 \
-  --lambda_ssim 0.2
-```
-
 ---
-**7) Text-Conditioned Training**
-``` Bash
-python main.py --config config.yaml clip.text_prompt="low-light scene"
+
+### 🔶 Baseline Gaussian Reconstruction using MVSplat
+
+MVSplat 에서 baseline gaussian 재구성 할때:
+``` bash
+for scene_name in "cabin" "chair" "fan" "musharna" "office" "table"; do
+  echo "Processing scene: $scene_name"
+  
+  python -m src.scripts.infer_colmap \
+    --colmap-model ./datasets/colmap_based/${scene_name}_undistorted/sparse \
+    --images ./datasets/colmap_based/${scene_name}_undistorted/images \
+    --checkpoint checkpoints/re10k.ckpt \
+    --context-indices 2 8 \
+    --target-index 5 \
+    --near 30 \
+    --far 100 \
+    --output ../low-light/data/${scene_name}_undistorted/base_render.png \
+    --ply-output ../low-light/data/${scene_name}_undistorted/base_gaussians.ply
+done
 ```
-또는 `config.yaml`을 직접 수정할 수도 있다.
-
-**8) Image-Conditioned Training**
-``` Bash
-python - <<'PY'
-import yaml
-from pathlib import Path
-
-p = Path("config.yaml")
-cfg = yaml.safe_load(p.read_text())
-cfg["clip"]["image_path"] = "assets/example.png"
-cfg["pipeline"]["run_clip_encode"] = True
-cfg["pipeline"]["run_injection"] = True
-p.write_text(yaml.safe_dump(cfg, allow_unicode=True))
-PY
-
-python main.py --config config.yaml
-```
-
 ---
-### 🔶 Gaussian Reconstruction using StereoGS
-Recommended commmand
+
+### 🔶 Gaussian Enhance Network
+
+#### 🔹 Train
+
+프로젝트 루트에서 다음과 같이 학습한다. tqdm은 epoch별 배치 진행률과 현재/평균
+loss를 표시한다.
+
 ```bash
-python train.py \
-  -s /path/to/scene \
-  -m ./output/LLFF/scene_3views \
-  --dataset_name LLFF \
-  --n_views 3 \
-  --resolution 8 \
-  --eval \
-  --sh_degree 3 \
-  --use_mvs_init \
-  --mvs_model_name MVSAnywhere \
-  --opacity_decay \
-  --opacity_decay_factor 0.99 \
-  --grad_sensitivity 0.5 \
-  --generate_binocular_view \
-  --start_generate_binocular_view_iters 20000 \
-  --cam_trans_dist 4.0 \
-  --binocular_model_type FoundationStereo \
-  --binocular_depth \
-  --lambda_binocular 1.0 \
-  --dropout_factor 0.3 \
-  --init_pcd_downsample 0.1
+python train/train_enhance_network.py --dataset_yaml dataset.yaml
 ```
-Required structure of `/path/to/acene`
-``` bash
-scene/
-├── images/
-└── sparse/
-    └── 0/
-        ├── cameras.bin
-        ├── images.bin
-        └── points3D.bin
-```
-Example for `office1`:
-``` bash
-python train.py \
-  -s /home/work/test2/datasets/office1 \
-  -m ./output/LLFF/office1_5views \
-  --dataset_name LLFF \
-  --n_views 3 \
-  --resolution 8 \
-  --eval \
-  --sh_degree 3
-```
----
-### 🔶 `train_injection_network.py`
-Dataset YAML에 등록한 밝은 source Gaussian, inverse-ISP pseudo-GT 이미지,
-이미지별 prompt로 학습한다.
 
-#### 🔸 Dataset Training
+기본 저장 위치는 `snapshots/`이다. `latest.pth`는 매 epoch 덮어써 저장하고,
+`snapshot_iter` epoch 간격 및 마지막 epoch에는 `epoch_XXXX.pth` 체크포인트도
+저장한다. 저장 경로와 간격은 `--snapshots_folder`, `--snapshot_iter`로 바꿀 수
+있다. 저장된 가중치를 불러와 이어서 학습하려면:
 
-``` Bash
-export PYTHONPATH=$PWD
-python train/train_injection_network.py \
+```bash
+python train/train_enhance_network.py \
   --dataset_yaml dataset.yaml \
-  --sh_degree 3 \
-  --batch_size 2 \
-  --epochs 10 \
-  --device cuda
+  --load_pretrain \
+  --pretrain_dir snapshots/latest.pth
 ```
 
-`batch_size`는 한 optimization step에 사용할 dataset sample 수다. 각 sample의
-Gaussian 개수는 다를 수 있으므로 DataLoader는 sample list를 반환하고, 학습
-루프는 sample별 render loss를 계산한 뒤 batch 평균으로 업데이트한다. Prompt는
-각 batch에서 CLIP으로 한 번에 인코딩한다.
+#### 🔹 Inference
 
-새 학습 스크립트는 dataset 기반 입력만 지원한다. 단일 PLY와 단일 캡션을
-사용하는 기존 방식 대신, 모든 학습 sample을 `dataset.yaml`에 등록한 뒤
-`--dataset_yaml`로 전달한다.
+학습된 네트워크를 baseline Gaussian PLY에 적용하고 지정한 카메라 뷰를 렌더링하려면:
 
----
-### 🔶 Synthesizing Dark Images - Inverse ISP
-`models/inverse_isp.py`에 구현되어 있으며, 사용 예시는 다음과 같다
-``` python
-from models.inverse_isp import InverseISP
-
-InverseISP().from_path(
-    "source.png",
-    "target_low_light.png",
-    seed=42,
-    strength=0.5,
-)
+```bash
+python infer_enhance.py \
+  --baseline_gaussian data/scene_001/base_gaussians.ply \
+  --checkpoint snapshots/latest.pth \
+  --camera_json data/scene_001/cameras.json \
+  --camera_ids 2 \
+  --output_dir output/scene_001_inference
 ```
+
+`--camera_ids`를 생략하면 카메라 JSON의 모든 뷰를 렌더링한다. 추론 결과는
+`output_dir/enhanced_gaussians.ply`와 `output_dir/render_<camera_id>.png`에
+저장된다. 기본 checkpoint는 `snapshots/latest.pth`이며, `--output_ply`,
+`--chunk_size`, `--device`로 저장 위치·추론 chunk 크기·CUDA 장치를 지정할 수 있다.
+추론 입력 색상은 source PLY의 DC SH를 RGB로 변환해 사용하며, geometry와 나머지
+SH 계수는 변경하지 않는다. 렌더링에는 `render/renderer_splats.py`와 동일하게
+CUDA `diff_gaussian_rasterization` 환경이 필요하다.
+
 ---
