@@ -2,14 +2,15 @@ import torch
 import os
 import sys
 import argparse
-import loss
 import numpy as np
 
 from plyfile import PlyData
 import torch.nn.functional as F
 import models.enhance_gaussian
 import datasets.dataset
+import render.renderer_splats
 from initialize_gaussians import initialize_gaussians
+from loss import L_color, L_exp, L_reg, L_spa
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir) #low-light
@@ -68,8 +69,9 @@ def train(config):
     # Loss
     ######################################################
     # Rendered loss
-    L_color = loss.L_color()
-    L_exp = loss.L_exp(16, 0.6)
+    color_loss = L_color()
+    exposure_loss = L_exp(16, 0.6)
+    spatial_loss = L_spa().to(device)
 
     optimizer = torch.optim.Adam(GE_net.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
@@ -102,17 +104,46 @@ def train(config):
                     enhanced_rgb - 0.5
                 ) / C0
                 # The remaining geometry and SH coefficients are unchanged.
-                rendered_img = None  # Render at sample["render_view"]["camera"].
-
+                rendered_img = render.renderer_splats.render_gaussians(
+                    enhanced_gaussians,
+                    sample["render_view"]["camera"],
+                    background=(0.0, 0.0, 0.0),
+                    device=device
+                )
                 if rendered_img is None:
-                    raise NotImplementedError(
-                        "Connect the differentiable Gaussian renderer before training."
+                    raise TypeError(
+                        "Got 'None' for rendered image"
                     )
+                rendered_img = rendered_img.unsqueeze(0)
 
-                loss_col = 5 * torch.mean(L_color(rendered_img))
-                loss_exp = 10 * torch.mean(L_exp(rendered_img))
-                loss = loss_col + loss_exp
+                loss_col = 5 * color_loss(rendered_img).mean()
+                loss_exp = 10 * exposure_loss(rendered_img).mean()
+                spatial_losses = []
+                for input_view in sample["input_views"]:
+                    rendered_input_view = render.renderer_splats.render_gaussians(
+                        enhanced_gaussians,
+                        input_view["camera"],
+                        background=(0.0, 0.0, 0.0),
+                        device=device,
+                    )
+                    if rendered_input_view is None:
+                        raise TypeError("Got 'None' for rendered input view")
 
+                    target_image = input_view["image"].to(
+                        device=device, dtype=rendered_input_view.dtype
+                    ).unsqueeze(0)
+                    spatial_losses.append(
+                        spatial_loss(
+                            target_image, rendered_input_view.unsqueeze(0)
+                        ).mean()
+                    )
+                loss_spa = torch.stack(spatial_losses).mean()
+                loss_reg = 0    # L_reg(enhancement)
+                loss = config.lambda_color * loss_col \
+                    + config.lambda_exp * loss_exp \
+                    + config.lambda_spa * loss_spa \
+                    + config.lambda_curve * loss_reg
+                        
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     GE_net.parameters(), config.grad_clip_norm
@@ -134,6 +165,10 @@ if __name__ == "__main__":
     parser.add_argument('--weight_decay', type=float, default=0.0001, help='')
     parser.add_argument('--num_epochs', type=int, default=200, help='')
     parser.add_argument('--grad_clip_norm', type=float, default=0.1)
+    parser.add_argument('--lambda_exp', type=float, default=0.25)
+    parser.add_argument('--lambda_color', type=float, default=0.25)
+    parser.add_argument('--lambda_spa', type=float, default=0.25)
+    parser.add_argument('--lambda_curve', type=float, default=0.25)
     parser.add_argument('--display_iter', type=int, default=10)
     parser.add_argument('--snapshot_iter', type=int, default=10)
     parser.add_argument('--snapshots_folder', type=str, default='snapshots')
