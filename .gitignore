@@ -6,7 +6,7 @@ __pycache__/
 # Experiment outputs
 output/injection/*.pt
 output/rendered/
-output/*
+# output/*
 
 data/
 # datasets/
