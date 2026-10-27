@@ -6,6 +6,8 @@ __pycache__/
 # Experiment outputs
 output/injection/*.pt
 output/rendered/
+output/*
+
 data/
 datasets/
 snapshots/epoch_*.pth
