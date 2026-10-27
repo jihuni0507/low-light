@@ -9,5 +9,5 @@ output/rendered/
 output/*
 
 data/
-datasets/
+# datasets/
 snapshots/epoch_*.pth

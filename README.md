@@ -240,7 +240,12 @@ done
 ```
 
 ```txt
+cabin: Estimated near=5.64178, far=14.2082
 chair: Estimated near=5.64178, far=14.2082
+fan: Estimated near=8.46472, far=25.2354
+musharna: Estimated near=108.55, far=428.73
+office: Estimated near=2.42889, far=8.48981
+table: Estimated near=3.95051, far=27.7402
 ```
 
 `near`, `far` 지정 후 MVSplat 에서 baseline gaussian 재구성 할때:
@@ -299,6 +304,20 @@ python infer_enhance.py \
   --output_dir output/cabin_7
 ```
 
+```bash
+for scene_name in "cabin" "chair" "fan" "musharna" "office" "table"; do
+  echo "Processing scene: $scene_name"
+
+  python infer_enhance.py \
+  --baseline_gaussian data/${scene_name}_undistorted/base_gaussians.ply \
+  --checkpoint snapshots/latest.pth \
+  --colmap_model data/${scene_name}_undistorted/sparse \
+  --camera_ids 5 \
+  --images_dir data/${scene_name}_undistorted/images \
+  --output_dir output/${scene_name}_5
+done
+```
+
 MVSplat에서 Gaussian PLY를 내보낼 때 위치를 중심 이동·정규화·회전하므로,
 원본 COLMAP pose를 그대로 넣으면 PLY와 좌표계가 달라 검은 이미지가 나올 수 있다.
 수정된 `mvsplat/src/scripts/infer_colmap.py`는 PLY와 함께 변환된 카메라 pose를
@@ -321,3 +340,15 @@ SH 계수는 변경하지 않는다. 렌더링에는 `render/renderer_splats.py`
 CUDA `diff_gaussian_rasterization` 환경이 필요하다.
 
 ---
+
+## ❗ Report
+#### 🔶 Anyalysis
+`musharna`만 제외하고 enhance network를 학습시킨 이후 5번 인덱스에 대해 모든 scene에서 인퍼런스만 수행한 결과.
+- `musharna`의 경우 `near`, `far`이 매우 크게 나타났고, 네트워크가 학습한 scene에 비해 enhance 성능이 떨어짐
+
+#### 🔶 Conclusion
+- RE10k 같은 대규모 데이터를 가져와 많은 scene을 학습시켰을 때 일반화 성능이 개선되는지 확인 필요함
+
+- 베이스라인 가우시안 구축(MVSplat) 및 GE 네트워크에 입력되는 이미지를 어둡게 해 low-light 시나리오 재현해야 함
+
+
