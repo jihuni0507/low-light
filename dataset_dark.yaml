@@ -1,0 +1,134 @@
+dataset:
+  root: ./data
+  samples:
+    - id: cabin_undistorted_darked_0
+      source_gaussian_ply: ./cabin_undistorted_darked/base_gaussians.ply
+      colmap_model: ./cabin_undistorted_darked/sparse
+      input_views:
+        - image: ./cabin_undistorted_darked/images/image002.jpg
+          camera_id: 1  # images.txt의 IMAGE_ID
+        - image: ./cabin_undistorted_darked/images/image008.jpg
+          camera_id: 8
+      render_view:
+        camera_id: 5
+
+    - id: chair_undistorted_darked_0
+      source_gaussian_ply: ./chair_undistorted_darked/base_gaussians.ply
+      colmap_model: ./chair_undistorted_darked/sparse
+      input_views:
+        - image: ./chair_undistorted_darked/images/image003.jpg
+          camera_id: 3
+        - image: ./chair_undistorted_darked/images/image009.jpg
+          camera_id: 9
+      render_view:
+        camera_id: 5
+
+    - id: chair_undistorted_darked_1
+      source_gaussian_ply: ./chair_undistorted_darked/base_gaussians.ply
+      colmap_model: ./chair_undistorted_darked/sparse
+      input_views:
+        - image: ./chair_undistorted_darked/images/image004.jpg
+          camera_id: 4
+        - image: ./chair_undistorted_darked/images/image010.jpg
+          camera_id: 10
+      render_view:
+        camera_id: 6
+
+    - id: chair_undistorted_darked_2
+      source_gaussian_ply: ./chair_undistorted_darked/base_gaussians.ply
+      colmap_model: ./chair_undistorted_darked/sparse
+      input_views:
+        - image: ./chair_undistorted_darked/images/image007.jpg
+          camera_id: 7
+        - image: ./chair_undistorted_darked/images/image013.jpg
+          camera_id: 13
+      render_view:
+        camera_id: 11
+  
+    - id: chair_undistorted_darked_3
+      source_gaussian_ply: ./chair_undistorted_darked/base_gaussians.ply
+      colmap_model: ./chair_undistorted_darked/sparse
+      input_views:
+        - image: ./chair_undistorted_darked/images/image008.jpg
+          camera_id: 8
+        - image: ./chair_undistorted_darked/images/image014.jpg
+          camera_id: 14
+      render_view:
+        camera_id: 12
+
+    - id: fan_undistorted_darked_0
+      source_gaussian_ply: ./fan_undistorted_darked/base_gaussians.ply
+      colmap_model: ./fan_undistorted_darked/sparse
+      input_views:
+        - image: ./fan_undistorted_darked/images/image003.jpg
+          camera_id: 3
+        - image: ./fan_undistorted_darked/images/image009.jpg
+          camera_id: 9
+      render_view:
+        camera_id: 5
+
+    - id: fan_undistorted_darked_1
+      source_gaussian_ply: ./fan_undistorted_darked/base_gaussians.ply
+      colmap_model: ./fan_undistorted_darked/sparse
+      input_views:
+        - image: ./fan_undistorted_darked/images/image005.jpg
+          camera_id: 4
+        - image: ./fan_undistorted_darked/images/image009.jpg
+          camera_id: 9
+      render_view:
+        camera_id: 6
+  
+    - id: fan_undistorted_darked_2
+      source_gaussian_ply: ./fan_undistorted_darked/base_gaussians.ply
+      colmap_model: ./fan_undistorted_darked/sparse
+      input_views:
+        - image: ./fan_undistorted_darked/images/image007.jpg
+          camera_id: 7
+        - image: ./fan_undistorted_darked/images/image013.jpg
+          camera_id: 13
+      render_view:
+        camera_id: 11
+
+    - id: office_undistorted_darked_0
+      source_gaussian_ply: ./office_undistorted_darked/base_gaussians.ply
+      colmap_model: ./office_undistorted_darked/sparse
+      input_views:
+        - image: ./office_undistorted_darked/images/11.jpg
+          camera_id: 3
+        - image: ./office_undistorted_darked/images/17.jpg
+          camera_id: 9
+      render_view:
+        camera_id: 5
+
+    - id: table_undistorted_darked_0
+      source_gaussian_ply: ./table_undistorted_darked/base_gaussians.ply
+      colmap_model: ./table_undistorted_darked/sparse
+      input_views:
+        - image: ./table_undistorted_darked/images/image003.jpg
+          camera_id: 3
+        - image: ./table_undistorted_darked/images/image009.jpg
+          camera_id: 9
+      render_view:
+        camera_id: 5
+
+    - id: table_undistorted_darked_2
+      source_gaussian_ply: ./table_undistorted_darked/base_gaussians.ply
+      colmap_model: ./table_undistorted_darked/sparse
+      input_views:
+        - image: ./table_undistorted_darked/images/image004.jpg
+          camera_id: 4
+        - image: ./table_undistorted_darked/images/image010.jpg
+          camera_id: 10
+      render_view:
+        camera_id: 6
+  
+    - id: table_undistorted_darked_3
+      source_gaussian_ply: ./table_undistorted_darked/base_gaussians.ply
+      colmap_model: ./table_undistorted_darked/sparse
+      input_views:
+        - image: ./table_undistorted_darked/images/image007.jpg
+          camera_id: 7
+        - image: ./table_undistorted_darked/images/image013.jpg
+          camera_id: 13
+      render_view:
+        camera_id: 11

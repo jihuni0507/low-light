@@ -1,39 +1,39 @@
-# config.yaml
-pipeline:
-  run_train_base: false
-  run_clip_encode: true
-  run_injection: true
+# # config.yaml
+# pipeline:
+#   run_train_base: false
+#   run_clip_encode: true
+#   run_injection: true
 
-global:
-  device: "cuda"  # or "cpu"
+# global:
+#   device: "cuda"  # or "cpu"
 
-train:
-  colmap_dir: "datasets/colmap"
-  data_dir: ""
-  output_dir: "./output/base"
-  max_train_steps: 1000
-  epochs: 1
-  learning_rate: 0.001
-  batch_size: 1
-  num_workers: 0
-  seed: 43
-  model_name: "StereoGS"
-  sh_degree: 3
-  load_pretrained_model: false
+# train:
+#   colmap_dir: "datasets/colmap"
+#   data_dir: ""
+#   output_dir: "./output/base"
+#   max_train_steps: 1000
+#   epochs: 1
+#   learning_rate: 0.001
+#   batch_size: 1
+#   num_workers: 0
+#   seed: 43
+#   model_name: "StereoGS"
+#   sh_degree: 3
+#   load_pretrained_model: false
 
-clip:
-  model_name: "openai/clip-vit-base-patch32"
-  text_prompt: "low-light"
-  image_path: ""
+# clip:
+#   model_name: "openai/clip-vit-base-patch32"
+#   text_prompt: "low-light"
+#   image_path: ""
 
-injection:
-  # StereoGS writes: <model_path>/point_cloud/iteration_<N>/point_cloud.ply
-  gaussian_ply: "../StereoGS/output/LLFF/point_cloud/iteration_30000/point_cloud.ply"
-  target_ply: ""
-  output_ply: "output/injection/injected_gaussians.ply"
-  checkpoint: "output/injection/injection_network.pt"
-  learning_rate: 0.0001
-  epochs: 10
-  hidden_dim: 256
-  freeze_geometry: true
-  target_attr: "SH_DC"
+# injection:
+#   # StereoGS writes: <model_path>/point_cloud/iteration_<N>/point_cloud.ply
+#   gaussian_ply: "../StereoGS/output/LLFF/point_cloud/iteration_30000/point_cloud.ply"
+#   target_ply: ""
+#   output_ply: "output/injection/injected_gaussians.ply"
+#   checkpoint: "output/injection/injection_network.pt"
+#   learning_rate: 0.0001
+#   epochs: 10
+#   hidden_dim: 256
+#   freeze_geometry: true
+#   target_attr: "SH_DC"

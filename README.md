@@ -85,10 +85,20 @@ InverseISP().from_path(
 ```
 ---
 ```bash
-python models/inverse_isp.py ./datasets/example/ ./datasets/example_darken --seed 42 --strength 0.5
+python models/inverse_isp.py ./datasets/ ./datasets/example_darken --seed 42 --strength 0.9
 ```
 `--strength`는 0~1 범위이며, 0은 원본을 유지하고 1은 거의 검은색에 가까운
 강한 어두움 효과를 적용한다. 생략하면 기본값 1이 적용된다.
+
+``` bash
+python models/colmap_dark.py \
+  --input_dir data \
+  --output_dir data \
+  --seed 42 \
+  --strength 0.5
+```
+
+---
 
 `dataset.yaml` 예시:
 
@@ -165,59 +175,6 @@ for batch in dataloader:
     predicted = injection_network(source_features, sample_condition)
 ```
 
-Gaussian 개수가 sample마다 다를 수 있으므로 기본 `collate_fn`은 tensor를
-하나로 쌓지 않고 sample dictionary의 list를 반환한다. 따라서 각 sample의
-loss를 계산한 뒤 평균을 내는 방식으로 학습한다. 모든 sample의 Gaussian 수가
-같은 경우에도 이 방식은 사용할 수 있으며, 추후 padding 기반 batch 연산으로
-최적화할 수 있다.
-
-### 🔶 Train
-
-학습 결과는 `output/injection/injection_network.pt`에 저장된다. 저장된 가중치를
-사용해 source PLY에 appearance를 적용하려면:
-``` Bash
-python main.py --config config.yaml --stage injection --train False
-```
-Inference는 체크포인트를 불러와 SH feature를 갱신하고
-`output/injection/injected_gaussians.ply`에 저장한다.
-
-**5) Gaussian 렌더링**
-
-`render/renderer_splats.py`는 PLY에서 위치, log-scale, quaternion, opacity
-logit, SH 계수를 읽고, 카메라 JSON의 camera-to-world pose와 intrinsics를 사용해
-이미지를 생성한다. StereoGS의 Python Camera/모델 객체는 사용하지 않는다.
-카메라 JSON은 카메라 목록(list) 또는 `{"cameras": [...]}` 형식이며, 각 항목은
-`id`, `width`, `height`, `fx`, `fy`, `rotation`(3×3 camera-to-world 회전),
-`position`(camera-to-world 위치)을 포함해야 한다. `cx`, `cy`는 선택 항목이고,
-생략하면 이미지 중심을 사용한다.
-
-``` Bash
-python render/renderer_splats.py \
-  --ply output/injection/injected_gaussians.ply \
-  --camera_json path/to/cameras.json \
-  --mode cameras \
-  --output_dir output/rendered/cameras \
-  --video output/rendered/cameras.mp4 \
-  --device cuda
-```
-
-- `render_gaussians()` 함수는 PLY 대신 가우시안 텐서 mapping도 받을 수 있다.
-- `xyz`, `scaling`, `rotation`, `opacity`와 SH `features`(또는
-`features_dc`/`features_rest`)를 넘기며, 기본적으로 scale은 log-scale,
-opacity는 logit으로 해석한다.
-- 이미 RGB 색상을 가진 경우에는 SH 대신 `colors` 텐서를 넘길 수 있다.
-- 렌더러는 CUDA rasterizer를 사용하므로 `diff_gaussian_rasterization`이 설치된 환경에서 실행한다.
-
-
-**6) Pseudo-GT image loss**
-
-`train_injection_network.py`는 다음 pseudo-GT image loss를 사용한다.
-
-```text
-L = lambda_image * L1(render(SH_pred), pseudo_GT_image)
-  + lambda_ssim * (1 - SSIM(render(SH_pred), pseudo_GT_image))
-```
-
 ---
 
 ### 🔶 Baseline Gaussian Reconstruction using MVSplat
@@ -229,13 +186,13 @@ for scene_name in "cabin" "chair" "fan" "musharna" "office" "table"; do
   echo "Processing scene: $scene_name"
 
 python -m src.scripts.infer_colmap_auto_bounds \
-  --colmap-model ./datasets/colmap_based/${scene_name}_undistorted/sparse \
-  --images ./datasets/colmap_based/${scene_name}_undistorted/images \
+  --colmap-model ./datasets/colmap_based/${scene_name}_undistorted_darked/sparse \
+  --images ./datasets/colmap_based/${scene_name}_undistorted_darked/images \
   --checkpoint checkpoints/re10k.ckpt \
   --context-indices 2 8 \
   --target-index 5 \
-  --output ../low-light/data/${scene_name}_undistorted/base_render.png \
-  --ply-output ../low-light/data/${scene_name}_undistorted/base_gaussians.ply
+  --output ../low-light/data/${scene_name}_undistorted_darked/base_render.png \
+  --ply-output ../low-light/data/${scene_name}_undistorted_darked/base_gaussians.ply
 done
 ```
 
@@ -342,6 +299,7 @@ CUDA `diff_gaussian_rasterization` 환경이 필요하다.
 ---
 
 ## ❗ Report
+
 #### 🔶 Anyalysis
 `musharna`만 제외하고 enhance network를 학습시킨 이후 5번 인덱스에 대해 모든 scene에서 인퍼런스만 수행한 결과.
 - `musharna`의 경우 `near`, `far`이 매우 크게 나타났고, 네트워크가 학습한 scene에 비해 enhance 성능이 떨어짐

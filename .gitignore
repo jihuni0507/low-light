@@ -6,8 +6,10 @@ __pycache__/
 # Experiment outputs
 output/injection/*.pt
 output/rendered/
-output/*
+# output/*
 
-data/
-# datasets/
-snapshots/epoch_*.pth
+# darked_data/*
+# data/
+# # datasets/
+# snapshots/epoch_*.pth
+test/*
