@@ -1,23 +1,74 @@
-### 🟦 Checklist
+# 🟦 Analysis
 
-- [ ] **Dark Image 생성 로직 점검** - `enhance_dark.py`, `generate_dark.py` 로직 및 성능 비교
-- [ ] JPG 이미지 darken 이후 zero-dce로 복원했을 때 결과가 이상적이지 않음, PNG 이미지로 했을 때도 그런지 확인
+## 10.27
 
-- [ ] **Per-scene Optimization** 가장 먼저 10장 이상의 enhanced image 바탕 3DGS로 견고하게 geometry를 재건한 이후에(geometry는 잘 되었다는 가정) 원래대로 두장의 이미지만 입력으로 넣었다고 생각하고 가우시안 컬러 수정하는 네트워크 검증
+### Dataset
+직접 촬영한 영상에서 프레임을 추출한 COLMAP 기반 커스텀 데이터셋을 사용함
+``` text
+cabin, chair, fan, musharna, office, table
+```
 
-### TODO
+### Experiment
 
-아니요. rendered_img = None을 실제 렌더 호출로 바꾸는 것은 필요한 작업이지만, 그것만으로 학습이 완성되지는 않습니다. 현재 확인한 train_enhance_network.py에는 렌더링 외에도 아직 연결해야 할 부분이 있습니다.
+**🔸 Train GE-Net**
 
-최소한 학습 단계마다 다음 흐름이 이어져야 합니다.
+``` text
+normal light scenes:
 
-배치에서 scene의 PLY 경로와 세 번째 view의 카메라 정보를 받습니다.
-그 PLY를 읽어 base_gaussians를 준비합니다.
-GE_net으로 Gaussian의 색 속성을 보정합니다.
-보정된 속성을 사용해 세 번째 카메라에서 미분 가능한 renderer를 호출합니다.
-렌더 결과로 unsupervised loss를 계산하고, Gaussian-domain loss와 합쳐 backward()합니다.
-특히 렌더 결과가 GE_net까지 gradient를 전달해야 합니다. 보정된 색을 detach()하거나, gradient 경로가 끊기는 방식으로 새 Parameter에 복사하면 렌더링 loss가 네트워크를 학습시키지 못합니다. Geometry를 고정하더라도 색 속성에 대한 연산 그래프는 보존되어야 합니다.
+musharna: 0 samples
+chair: 3 samples
+other scene: 1 sample
+```
+체크포인트:  `./snpashots/1027_best.pth`
 
-그리고 두 입력 이미지가 의도한 네트워크 입력이라면, 지금처럼 GE_net(base_gaussians)만 호출해서는 그 이미지 정보가 네트워크에 전달되지 않습니다. 현재 구조에서는 이미지가 별도 loss에 쓰이거나, 네트워크의 conditioning 입력으로 추가되어야 실제로 활용됩니다.
+**🔸 Inference**
 
-따라서 Dataset에서 세 번째 카메라 정보를 반환하고, PLY 로드·보정 Gaussian을 renderer에 전달하는 경로까지 먼저 연결해야 합니다. 이 작업들이 이미 되어 있고 rendered_img만 비어 있다면 그 호출부가 마지막 주요 연결점일 수 있지만, 현재 확인된 스크립트에는 base_gaussians = None 등 다른 미구현 부분도 남아 있습니다.
+Invesre ISP를 통한 Dark synthesis 강도를 세가지로 나눔
+ - `strength=0` (normal light), `strength=0.5` (dark), `strength=0.9` (darker)
+
+---
+
+### Results
+`strength=0.5`로 dark synthesis한 scene으로 학습한 GE-net 체크포인트를
+정상 이미지에 적용했더니 가우시안들이 하얗게 타버림
+
+ - 충분히 밝다면 더이상 밝게 하지 않는 loss도 추가해야 함
+ - 또는 inverse_isp 과정 자체가 네트워크 학습을 불안정하게 하는 요소일 수 있음 (인위적인 색 열화 + 노이즈 재현에 의해)
+
+✅ Baseline 가우시안에서부터 geometry를 제대로 잡지 못했지만 정상 이미지, dark synthesis된 이미지 모두 일관되게 enhance하는 결과가 나타남
+→ 실제 GE-Net이 low-light restoration 역할을 수행하고 있음
+
+
+❌ Baseline 가우시안에서부터 geometry가 크게 어긋남
+
+❌ blue 컬러 편향이 나타남
+
+❌ 인퍼런스 시 결과가 입력 이미지의 밝기에 비례함 (어두울수록 결과도 어두움)
+
+# 이후 가능한 방향성
+## 10.27
+**⭐ 1️⃣ 실제 low-light 데이터셋 활용**
+
+- Inverse ISP로 어둡게 열화시킨 이미지를 사용하지 않고 실제 저조도 환경에서 촬영한 scene 사용
+
+- ❌ Low-light 시나리오를 가정하므로 필수적인 과정이지만, COLMAP이 제대로 작동하지 않아 카메라 포즈가 부정확해질 수 있음
+
+**⭐⭐ 2️⃣ GE-Net 학습 시 입력 이미지의 Dark synthesis 강도를 늘려가며 학습**
+
+- 정상 이미지로 학습한 GE-Net은 `strength`가 `0, 0.5, 0.9`인 scene 모두 enhance할 수 있었음
+- Dark Synthesis한 이미지로 학습한 GE-Net을 적용할 경우 세가지 조건 모두 가우시안이 하얗게 타버리는 결과가 나타남
+
+따라서 GE-Net을 학습할 때, 처음에는 정상 이미지를 입력하다가 에포크가 진행됨에 따라 `0.5`, `0.9`만큼 dark synthesis한 입력 이미지도 차례대로 학습할 수 있도록 설정
+
+**3️⃣ MVSplat으로 baseline 가우시안 재구성 시 `near`, `far`값 직접 라벨링**
+- 실제 MVSplat 저자도 적절한 `near`, `far`값을 찾기 위해 임의로 값을 설정해보고 최적의 값을 찾아냈다고 함
+- 특히 `near`값이 작아 가우시안이 카메라 앞에 몰리는 현상을 방지해야함 (`near_good_fan.png`, `near_too_low_table.png` 참고)
+- 초기 geometry를 잡는 데 도움이 될 것으로 기대됨
+
+**4️⃣ Loss항 추가**
+
+- 현재 가우시안의 위치, 크기는 구정하고 SH 계수에만 loss를 부여하고 있음
+
+**5️⃣ (선택) 데이터셋 / 학습 scene의 개수를 늘려 generalization 확보**
+- 외부 데이터셋 (RE10K, LLFF 등) 학습 시에 보지 못했던 새로운 scene에 대해서도 `baseline_gaussian`이 주어졌다면 enhance할 수 있게끔 학습
+- ❌ 굳이 필요한가? + 학논연 레벨을 넘어감 + 파인튜닝 많이 해야할 것
