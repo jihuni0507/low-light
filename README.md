@@ -71,7 +71,6 @@ low-light/
             └── ...
 ```
 
-
 #### **🔶 Synthesizing Dark Images - Inverse ISP**
 `models/inverse_isp.py`에 구현되어 있으며, 사용 예시는 다음과 같다
 ``` python
@@ -238,6 +237,10 @@ python -m src.scripts.infer_colmap_auto_bounds \
   --output ../low-light/data/${scene_name}_undistorted/base_render.png \
   --ply-output ../low-light/data/${scene_name}_undistorted/base_gaussians.ply
 done
+```
+
+```txt
+chair: Estimated near=5.64178, far=14.2082
 ```
 
 `near`, `far` 지정 후 MVSplat 에서 baseline gaussian 재구성 할때:
