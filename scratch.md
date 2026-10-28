@@ -60,15 +60,24 @@ Invesre ISP를 통한 Dark synthesis 강도를 세가지로 나눔
 
 따라서 GE-Net을 학습할 때, 처음에는 정상 이미지를 입력하다가 에포크가 진행됨에 따라 `0.5`, `0.9`만큼 dark synthesis한 입력 이미지도 차례대로 학습할 수 있도록 설정
 
-**3️⃣ MVSplat으로 baseline 가우시안 재구성 시 `near`, `far`값 직접 라벨링**
+**⭐3️⃣ MVSplat으로 baseline 가우시안 재구성 시 `near`, `far`값 직접 라벨링**
 - 실제 MVSplat 저자도 적절한 `near`, `far`값을 찾기 위해 임의로 값을 설정해보고 최적의 값을 찾아냈다고 함
 - 특히 `near`값이 작아 가우시안이 카메라 앞에 몰리는 현상을 방지해야함 (`near_good_fan.png`, `near_too_low_table.png` 참고)
 - 초기 geometry를 잡는 데 도움이 될 것으로 기대됨
 
 **4️⃣ Loss항 추가**
 
-- 현재 가우시안의 위치, 크기는 구정하고 SH 계수에만 loss를 부여하고 있음
+- 현재 가우시안의 위치, 크기는 구정하고 SH 계수에만 loss를 부여하고 있음 위치 수정한다면 rendering loss까지 (tradeoff 자유도는 높아지지만 GT가 주어짐)
 
 **5️⃣ (선택) 데이터셋 / 학습 scene의 개수를 늘려 generalization 확보**
 - 외부 데이터셋 (RE10K, LLFF 등) 학습 시에 보지 못했던 새로운 scene에 대해서도 `baseline_gaussian`이 주어졌다면 enhance할 수 있게끔 학습
 - ❌ 굳이 필요한가? + 학논연 레벨을 넘어감 + 파인튜닝 많이 해야할 것
+
+---
+## 1028
+
+- `enhance_gaussians.py`에서 `r` 해석 시도해볼것 (되면 좋고)
+- 이미지 -> Zero-DCE 먼저 하고 MVSplat 한것 과 결과 비교
+
+- (선택) 외부 데이터셋
+

@@ -250,6 +250,23 @@ table: Estimated near=3.95051, far=27.7402
 
 `near`, `far` 지정 후 MVSplat 에서 baseline gaussian 재구성 할때:
 ``` powershell
+SCENE_NAME=
+NEAR=
+FAR=
+
+python -m src.scripts.infer_colmap \
+  --colmap-model ./datasets/colmap_based/${SCENE_NAME}_undistorted/sparse \
+  --images ./datasets/colmap_based/${SCENE_NAME}_undistorted/images \
+  --checkpoint checkpoints/re10k.ckpt \
+  --context-indices 7 15 \
+  --target-index 11 \
+  --near ${NEAR} \
+  --far ${FAR} \
+  --output outputs/${SCENE_NAME}/5_near${NEAR}_far${FAR}.png \
+  --ply-output outputs/${SCENE_NAME}/5_near${NEAR}_far${FAR}.ply
+
+```
+``` powershell
 for scene_name in "cabin" "chair" "fan" "musharna" "office" "table"; do
   echo "Processing scene: $scene_name"
   
