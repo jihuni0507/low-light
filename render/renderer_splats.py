@@ -403,6 +403,8 @@ def main():
     if video_path is not None:
         video_path.parent.mkdir(parents=True, exist_ok=True)
     writer = None
+    
+    
     try:
         with torch.no_grad():
             for index, camera in enumerate(cameras):

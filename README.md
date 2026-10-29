@@ -313,7 +313,7 @@ python train/train_enhance_network.py \
 
 ```bash
 python infer_enhance.py \
-  --baseline_gaussian data/cabin_undistorted/base_gaussians.ply \
+  --baseline_gaussian data/cabin_undistorted/3dgs_gaussians.ply \
   --checkpoint snapshots/latest.pth \
   --colmap_model data/cabin_undistorted/sparse \
   --camera_ids 7 \

@@ -76,10 +76,11 @@ def save_enhanced_ply(source_path, output_path, enhanced_gaussians):
 
 
 def match_camera_image_size(camera, images_dir):
-    image_name = camera.get("image_name")
+    image_name = camera.get("image_name") or camera.get("img_name")
     if not image_name:
         raise ValueError(
-            "Camera metadata must include image_name to match the source image size"
+            "Camera metadata must include image_name or img_name to match "
+            "the source image size"
         )
 
     image_path = images_dir / image_name
