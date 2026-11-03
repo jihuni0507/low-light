@@ -3,7 +3,7 @@ import torch
 from plyfile import PlyData
 
 def main():
-    ply_path = 'C:/Users/IVL-SERVER2/Desktop/jihun/mvsplat/outputs/colmap/office_gaussians_10_100.ply'
+    ply_path = r"C:\Users\IVL-SERVER2\Desktop\jihun\low-light\data\cabin_undistorted\3dgs_gaussians.ply"
     plydata = PlyData.read(ply_path)
     vertex = plydata["vertex"]
     num_points = len(vertex)
@@ -91,6 +91,14 @@ def main():
         "sh_rest": features_extra_reshaped,
         "full": all_tensor,
     }
+    
+    # 5. Additional
+    print("\n=== [추가 정보] ===")
+    centroid = xyz.mean(0)
+    for camera in cameras:
+        c2w = np.array(camera["c2w"])
+        p_cam = np.linalg.inv(c2w) @ [centroid[0], centroid[1], centroid[2], 1.0]
+        print(p_cam)
     
 
 if __name__ == "__main__":

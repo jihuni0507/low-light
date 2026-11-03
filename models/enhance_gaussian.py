@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 
 import numpy as np
+# MLP도 나중에
 
 class gaussian_enhance_net(nn.Module):
     

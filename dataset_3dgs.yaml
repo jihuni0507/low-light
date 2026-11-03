@@ -1,0 +1,13 @@
+dataset:
+  root: ./data
+  samples:
+    - id: cabin_undistorted_0
+      source_gaussian_ply: ./cabin_undistorted/3dgs_gaussians.ply
+      colmap_model: ./cabin_undistorted/sparse
+      input_views:
+        - image: ./cabin_undistorted/images/image002.jpg
+          camera_id: 1  # images.txt의 IMAGE_ID
+        - image: ./cabin_undistorted/images/image008.jpg
+          camera_id: 8
+      render_view:
+        camera_id: 5
